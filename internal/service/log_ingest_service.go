@@ -4,10 +4,7 @@ import (
 	"context"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
-	"math"
 	"network-monitor-backend/internal/domain"
-	"sort"
-	"strings"
 	"time"
 )
 
@@ -32,20 +29,74 @@ type LogIngestService struct {
 func NewLogIngestService(logs LogRepository, incidents IncidentRepository, ml MLClient, notifications Notification, logger *zap.Logger, window float64) *LogIngestService {
 	return &LogIngestService{logs: logs, incidents: incidents, ml: ml, notifications: notifications, logger: logger, window: window}
 }
+
+// convertToRawLogs конвертирует domain.NetworkLog в domain.RawLogForML для отправки в ml2-http-service.
+func convertToRawLogs(logs []domain.NetworkLog) []domain.RawLogForML {
+	out := make([]domain.RawLogForML, len(logs))
+	for i, l := range logs {
+		ts := float64(l.Timestamp.UnixNano()) / 1e9
+		out[i] = domain.RawLogForML{
+			Timestamp: ts,
+			SrcMAC:    l.SrcMAC,
+			DstMAC:    l.DstMAC,
+			VLAN:      l.VLAN,
+			EthType:   l.EthType,
+			SrcIP:     l.SrcIP,
+			DstIP:     l.DstIP,
+			ICMPType:  l.ICMPType,
+			ICMPCode:  l.ICMPCode,
+			Proto:     l.Proto,
+			TTL:       l.TTL,
+			SrcPort:   l.SrcPort,
+			DstPort:   l.DstPort,
+			TCPFlags:  l.TCPFlags,
+			Length:    l.Length,
+		}
+	}
+	return out
+}
+
 func (s *LogIngestService) ProcessBatch(logs []domain.NetworkLog, agentID uuid.UUID) {
 	ctx := context.Background()
+
+	// 1. Сохраняем сырые логи в ClickHouse
 	if err := s.logs.BatchInsert(ctx, logs); err != nil {
 		s.logger.Error("clickhouse insert failed", zap.Error(err))
 		return
 	}
-	features, start, end := ExtractFeatures(logs, s.window)
-	res, err := s.ml.Analyze(ctx, domain.AnalyzeRequest{AgentID: agentID, TimeWindow: s.window, StartTime: start, EndTime: end, Features: features})
+
+	// 2. Передаём сырые логи в ml2-http-service (он сам делает агрегацию + ML)
+	rawLogs := convertToRawLogs(logs)
+	windowStart := logs[0].Timestamp.Format(time.RFC3339)
+	windowEnd := logs[len(logs)-1].Timestamp.Format(time.RFC3339)
+
+	res, err := s.ml.Analyze(ctx, domain.AnalyzeRequest{
+		AgentID:    agentID.String(),
+		TimeWindow: s.window,
+		StartTime:  windowStart,
+		EndTime:    windowEnd,
+		Logs:       rawLogs,
+	})
 	if err != nil {
 		s.logger.Warn("ml service call failed", zap.Error(err))
 		return
 	}
+
+	// 3. Если аномалия — создаём инцидент
 	if res.IsAnomaly {
-		inc := &domain.Incident{AgentID: agentID, ThreatType: classifyThreat(res, features), Severity: calculateSeverity(res.AnomalyScore, len(logs)), MLScore: res.AnomalyScore, Details: map[string]any{"top_suspicious_ips": res.TopSuspiciousIPs, "top_targeted_ports": res.TopTargetedPorts, "recommendations": res.Recommendations, "packet_count": features.PacketCount, "unique_src_ips": features.UniqueSrcIPs, "unique_dst_ports": features.UniqueDstPorts, "packets_per_second": features.PacketsPerSecond, "entropy_dst_ports": features.DstPortEntropy}}
+		inc := &domain.Incident{
+			AgentID:    agentID,
+			ThreatType: res.ThreatType, // классификация в ml2!
+			Severity:   calculateSeverity(res.AnomalyScore, len(logs)),
+			MLScore:    res.AnomalyScore,
+			Details: map[string]any{
+				"anomaly_score":   res.AnomalyScore,
+				"confidence":      res.Confidence,
+				"threat_type":     res.ThreatType,
+				"recommendations": res.Recommendations,
+				"log_count":       len(logs),
+			},
+		}
 		if err := s.incidents.Create(ctx, inc); err != nil {
 			s.logger.Error("failed to create incident", zap.Error(err))
 			return
@@ -53,98 +104,7 @@ func (s *LogIngestService) ProcessBatch(logs []domain.NetworkLog, agentID uuid.U
 		go s.notifications.SendTelegram(ctx, inc)
 	}
 }
-func ExtractFeatures(logs []domain.NetworkLog, window float64) (domain.FeatureVector, time.Time, time.Time) {
-	f := domain.FeatureVector{MinLength: math.MaxUint16}
-	if len(logs) == 0 {
-		return f, time.Now(), time.Now()
-	}
-	src, dst, dp, sp := map[string]bool{}, map[string]bool{}, map[uint16]int{}, map[uint16]bool{}
-	start, end := logs[0].Timestamp, logs[0].Timestamp
-	var lengthSum, ttlSum uint64
-	for _, l := range logs {
-		f.PacketCount++
-		if l.Timestamp.Before(start) {
-			start = l.Timestamp
-		}
-		if l.Timestamp.After(end) {
-			end = l.Timestamp
-		}
-		src[l.SrcIP] = true
-		dst[l.DstIP] = true
-		dp[l.DstPort]++
-		sp[l.SrcPort] = true
-		switch l.Proto {
-		case 6:
-			f.ProtoTCP++
-		case 17:
-			f.ProtoUDP++
-		case 1:
-			f.ProtoICMP++
-			f.ICMPCount++
-		}
-		flags := strings.ToUpper(l.TCPFlags)
-		if strings.Contains(flags, "SYN") {
-			f.TCPFlagsSYN++
-		}
-		if strings.Contains(flags, "ACK") {
-			f.TCPFlagsACK++
-		}
-		if strings.Contains(flags, "FIN") {
-			f.TCPFlagsFIN++
-		}
-		if strings.Contains(flags, "RST") {
-			f.TCPFlagsRST++
-		}
-		lengthSum += uint64(l.Length)
-		ttlSum += uint64(l.TTL)
-		if l.Length < f.MinLength {
-			f.MinLength = l.Length
-		}
-		if l.Length > f.MaxLength {
-			f.MaxLength = l.Length
-		}
-	}
-	f.UniqueSrcIPs = uint64(len(src))
-	f.UniqueDstIPs = uint64(len(dst))
-	f.UniqueDstPorts = uint64(len(dp))
-	f.UniqueSrcPorts = uint64(len(sp))
-	f.AvgLength = float64(lengthSum) / float64(len(logs))
-	f.AvgTTL = float64(ttlSum) / float64(len(logs))
-	dur := end.Sub(start).Seconds()
-	if dur <= 0 {
-		dur = window
-	}
-	f.PacketsPerSecond = float64(len(logs)) / dur
-	f.ConnectionSpread = float64(len(dst)) / float64(len(logs))
-	f.DstPortEntropy = entropy(dp, len(logs))
-	return f, start, end
-}
-func entropy(counts map[uint16]int, total int) float64 {
-	if total == 0 {
-		return 0
-	}
-	var h float64
-	for _, c := range counts {
-		p := float64(c) / float64(total)
-		h -= p * math.Log2(p)
-	}
-	if len(counts) > 1 {
-		h /= math.Log2(float64(len(counts)))
-	}
-	return h
-}
-func classifyThreat(r *domain.AnalyzeResponse, f domain.FeatureVector) string {
-	if r.ThreatType != "" {
-		return r.ThreatType
-	}
-	if f.UniqueDstPorts > 100 {
-		return "port_scan"
-	}
-	if f.PacketsPerSecond > 1000 {
-		return "ddos"
-	}
-	return "anomaly"
-}
+
 func calculateSeverity(score float64, n int) int {
 	s := 1
 	if score >= 0.3 {
@@ -161,5 +121,3 @@ func calculateSeverity(score float64, n int) int {
 	}
 	return s
 }
-
-var _ = sort.Ints

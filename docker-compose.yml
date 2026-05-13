@@ -44,7 +44,7 @@ services:
       DB_CLICKHOUSE_USER: default
       DB_CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
       DB_CLICKHOUSE_DB: default
-      ML_SERVICE_URL: http://ml-service:5000
+      ML_SERVICE_URL: http://ml2-http-service:5000
       ML_TIMEOUT: 30s
       ML_WINDOW_SECONDS: 300
       JWT_SECRET: ${JWT_SECRET}
@@ -61,7 +61,7 @@ services:
         condition: service_healthy
       clickhouse:
         condition: service_healthy
-      ml-service:
+      ml2-http-service:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -q -T 5 -O - http://127.0.0.1:8080/healthz | grep -q '\"status\":\"ok\"'"]
@@ -116,16 +116,15 @@ services:
     networks:
       - nm-network
 
-  ml-service:
+  ml2-http-service:
     build:
-      context: ./ml-service
+      context: ./ml2-http-service
       dockerfile: Dockerfile
-    container_name: nm-ml
+    container_name: nm-ml2-http
     ports:
-      - "5000:5000"
+      - "5001:5000"
     environment:
       MODEL_PATH: /models/anomaly_model.pkl
-      API_PORT: 5000
     volumes:
       - ml_models:/models
     healthcheck:

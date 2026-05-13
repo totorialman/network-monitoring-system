@@ -168,6 +168,109 @@ func (r *IncidentRepo) Stats(ctx context.Context) (map[string]any, error) {
 	res["threat_distribution"] = dist
 	return res, nil
 }
+
+// Timeseries возвращает агрегированные данные по часам для графика.
+func (r *IncidentRepo) Timeseries(ctx context.Context) []map[string]any {
+	var out []map[string]any
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT 
+			date_trunc('hour', created_at) AS bucket,
+			COUNT(*) AS incident_count,
+			COALESCE(AVG(severity), 0) AS avg_severity
+		FROM incidents 
+		WHERE created_at > NOW() - INTERVAL '24 hours'
+		GROUP BY bucket 
+		ORDER BY bucket ASC
+	`)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var bucket time.Time
+		var cnt int64
+		var avgSev float64
+		if err := rows.Scan(&bucket, &cnt, &avgSev); err != nil {
+			continue
+		}
+		out = append(out, map[string]any{
+			"timestamp":      bucket.Format(time.RFC3339),
+			"incident_count": cnt,
+			"log_volume":     0, // ClickHouse даёт log_volume, оставляем заглушку
+			"avg_severity":   avgSev,
+		})
+	}
+	return out
+}
+
+// TopSources возвращает топ IP-источников по числу инцидентов.
+func (r *IncidentRepo) TopSources(ctx context.Context) []map[string]any {
+	var out []map[string]any
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT 
+			details->>'top_suspicious_ips' AS src_ip,
+			COUNT(*) AS incident_count
+		FROM incidents 
+		WHERE details ? 'top_suspicious_ips'
+		GROUP BY src_ip 
+		ORDER BY incident_count DESC 
+		LIMIT 10
+	`)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ip string
+		var cnt int64
+		if err := rows.Scan(&ip, &cnt); err != nil {
+			continue
+		}
+		out = append(out, map[string]any{
+			"ip":             ip,
+			"incident_count": cnt,
+			"threat_types":   []string{},
+		})
+	}
+	// Если в details нет top_suspicious_ips, пробуем через src_ip в details
+	if len(out) == 0 {
+		return r.topSourcesFallback(ctx)
+	}
+	return out
+}
+
+// topSourcesFallback — запасной запрос для topSources через details->>'src_ip'
+func (r *IncidentRepo) topSourcesFallback(ctx context.Context) []map[string]any {
+	var out []map[string]any
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT 
+			details->>'src_ip' AS src_ip,
+			COUNT(*) AS incident_count
+		FROM incidents 
+		WHERE details ? 'src_ip'
+		GROUP BY src_ip 
+		ORDER BY incident_count DESC 
+		LIMIT 10
+	`)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ip string
+		var cnt int64
+		if err := rows.Scan(&ip, &cnt); err != nil {
+			continue
+		}
+		out = append(out, map[string]any{
+			"ip":             ip,
+			"incident_count": cnt,
+			"threat_types":   []string{},
+		})
+	}
+	return out
+}
+
 func (r *AlertRepo) RecordSent(ctx context.Context, incidentID uuid.UUID, channel, chatID string) {
 	_, _ = r.db.ExecContext(ctx, `INSERT INTO alerts(incident_id,channel,chat_id,sent_at,status) VALUES($1,$2,$3,NOW(),'sent')`, incidentID, channel, chatID)
 }
