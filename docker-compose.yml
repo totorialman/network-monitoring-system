@@ -1,0 +1,148 @@
+version: "3.8"
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ""
+    container_name: nm-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - nm-network
+
+  backend:
+    build:
+      context: .
+      dockerfile: cmd/server/Dockerfile
+    container_name: nm-backend
+    ports:
+      - "8080:8080"
+    environment:
+      APP_ENV: production
+      APP_PORT: 8080
+      APP_VERSION: 1.0.0
+      DB_POSTGRES_HOST: postgres
+      DB_POSTGRES_PORT: 5432
+      DB_POSTGRES_USER: nm_user
+      DB_POSTGRES_PASSWORD: ${DB_PASSWORD}
+      DB_POSTGRES_DB: network_monitor
+      DB_CLICKHOUSE_HOST: clickhouse
+      DB_CLICKHOUSE_PORT: 9000
+      DB_CLICKHOUSE_USER: default
+      DB_CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      DB_CLICKHOUSE_DB: default
+      ML_SERVICE_URL: http://ml-service:5000
+      ML_TIMEOUT: 30s
+      ML_WINDOW_SECONDS: 300
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRATION: 24h
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_ADMIN_CHAT_ID: ${TELEGRAM_ADMIN_CHAT_ID:-}
+      TELEGRAM_MIN_SEVERITY: ${TELEGRAM_MIN_SEVERITY:-3}
+      TELEGRAM_MIN_ML_SCORE: ${TELEGRAM_MIN_ML_SCORE:-0.6}
+      INIT_ADMIN_LOGIN: ${INIT_ADMIN_LOGIN:-admin}
+      INIT_ADMIN_PASSWORD: ${INIT_ADMIN_PASSWORD}
+      BASE_INCIDENT_URL: ${BASE_INCIDENT_URL:-https://monitor.local/incidents}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      ml-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -T 5 -O - http://127.0.0.1:8080/healthz | grep -q '\"status\":\"ok\"'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+    networks:
+      - nm-network
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: nm-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: nm_user
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: network_monitor
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nm_user -d network_monitor"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - nm-network
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:23.3-alpine
+    container_name: nm-clickhouse
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    environment:
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./clickhouse/config.xml:/etc/clickhouse-server/config.xml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --host 127.0.0.1 --port 9000 --user default --password \"$$CLICKHOUSE_PASSWORD\" --query 'SELECT 1' >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - nm-network
+
+  ml-service:
+    build:
+      context: ./ml-service
+      dockerfile: Dockerfile
+    container_name: nm-ml
+    ports:
+      - "5000:5000"
+    environment:
+      MODEL_PATH: /models/anomaly_model.pkl
+      API_PORT: 5000
+    volumes:
+      - ml_models:/models
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:5000/health').raise_for_status()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      - nm-network
+
+volumes:
+  postgres_data:
+  clickhouse_data:
+  ml_models:
+
+networks:
+  nm-network:
+    driver: bridge
