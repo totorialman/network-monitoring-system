@@ -38,9 +38,10 @@ import {
 } from "recharts";
 import { toast } from "sonner";
 
-const HERO_IMAGE = "https://d2xsxph8kpxj0f.cloudfront.net/310519663650836063/SY5usW3XTpofFNkmDPT4qo/nm-command-center-hero-icbThgi2WS4aejQ94eUd5R.webp";
-const GRID_IMAGE = "https://d2xsxph8kpxj0f.cloudfront.net/310519663650836063/SY5usW3XTpofFNkmDPT4qo/nm-network-grid-pattern-bxH2HuJ8CHeiMkkmeLXjfy.webp";
-const ORBIT_IMAGE = "https://d2xsxph8kpxj0f.cloudfront.net/310519663650836063/SY5usW3XTpofFNkmDPT4qo/nm-threat-orbit-BT2ncgQsMSjpo5C8QRxFLG.webp";
+// 🔥 Исправлено: пустые строки вместо неработающих CDN-ссылок
+const HERO_IMAGE = "";
+const GRID_IMAGE = "";
+const ORBIT_IMAGE = "";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
 
@@ -254,7 +255,8 @@ function MetricCard({ icon, label, value, hint, tone = "cyan" }: { icon: React.R
 }
 
 function Dashboard({ stats, period, setPeriod }: { stats: StatsResponse; period: string; setPeriod: (v: string) => void }) {
-  const distribution = Object.entries(stats.threat_distribution).map(([name, value]) => ({ name, value }));
+  // 🔥 Исправлено: защита от null в threat_distribution
+  const distribution = Object.entries(stats.threat_distribution || {}).map(([name, value]) => ({ name, value }));
   const colors = ["#22d3ee", "#f59e0b", "#ef4444", "#94a3b8"];
   return (
     <section className="dashboard-grid">
@@ -263,10 +265,11 @@ function Dashboard({ stats, period, setPeriod }: { stats: StatsResponse; period:
       <MetricCard icon={<AlertTriangle />} label="Новые" value={formatNumber(stats.overview.new_incidents)} hint="требуют реакции" tone="red" />
       <MetricCard icon={<RadioTower />} label="Активные агенты" value={formatNumber(stats.overview.active_agents)} hint="последняя активность" />
       <MetricCard icon={<Activity />} label="Логов обработано" value={formatNumber(stats.overview.total_logs_processed)} hint={`avg ML ${stats.overview.avg_ml_score.toFixed(2)}`} />
-      <article className="chart-card large"><h3>Инциденты и объем логов</h3><ResponsiveContainer width="100%" height={310}><AreaChart data={stats.timeseries}><defs><linearGradient id="volume" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#22d3ee" stopOpacity={0.35}/><stop offset="95%" stopColor="#22d3ee" stopOpacity={0}/></linearGradient></defs><CartesianGrid stroke="#1e3a4a" strokeDasharray="3 3" /><XAxis dataKey="timestamp" tickFormatter={(v) => new Date(v).getHours() + ":00"} stroke="#7dd3fc" /><YAxis stroke="#64748b" /><Tooltip contentStyle={{ background: "#07111d", border: "1px solid #164e63", color: "#e2e8f0" }} /><Area type="monotone" dataKey="log_volume" stroke="#22d3ee" fill="url(#volume)" /><Line type="monotone" dataKey="incident_count" stroke="#f59e0b" strokeWidth={2} /></AreaChart></ResponsiveContainer></article>
+      <article className="chart-card large"><h3>Инциденты и объем логов</h3><ResponsiveContainer width="100%" height={310}><AreaChart data={stats.timeseries || []}><defs><linearGradient id="volume" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#22d3ee" stopOpacity={0.35}/><stop offset="95%" stopColor="#22d3ee" stopOpacity={0}/></linearGradient></defs><CartesianGrid stroke="#1e3a4a" strokeDasharray="3 3" /><XAxis dataKey="timestamp" tickFormatter={(v) => new Date(v).getHours() + ":00"} stroke="#7dd3fc" /><YAxis stroke="#64748b" /><Tooltip contentStyle={{ background: "#07111d", border: "1px solid #164e63", color: "#e2e8f0" }} /><Area type="monotone" dataKey="log_volume" stroke="#22d3ee" fill="url(#volume)" /><Line type="monotone" dataKey="incident_count" stroke="#f59e0b" strokeWidth={2} /></AreaChart></ResponsiveContainer></article>
       <article className="chart-card"><h3>Типы угроз</h3><ResponsiveContainer width="100%" height={260}><PieChart><Pie data={distribution} dataKey="value" nameKey="name" innerRadius={60} outerRadius={95}>{distribution.map((_, index) => <Cell key={index} fill={colors[index % colors.length]} />)}</Pie><Tooltip contentStyle={{ background: "#07111d", border: "1px solid #164e63", color: "#e2e8f0" }} /></PieChart></ResponsiveContainer><div className="legend-list">{distribution.map((item, index) => <span key={item.name}><i style={{ background: colors[index % colors.length] }} />{item.name}: {item.value}</span>)}</div></article>
       <article className="chart-card"><h3>Средняя критичность</h3><ResponsiveContainer width="100%" height={260}><BarChart data={stats.timeseries}><CartesianGrid stroke="#1e3a4a" strokeDasharray="3 3" /><XAxis dataKey="timestamp" tickFormatter={(v) => new Date(v).getHours() + ":00"} stroke="#7dd3fc" /><YAxis stroke="#64748b" /><Tooltip contentStyle={{ background: "#07111d", border: "1px solid #164e63", color: "#e2e8f0" }} /><Bar dataKey="avg_severity" fill="#f59e0b" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></article>
-      <article className="chart-card sources"><h3>Top источники</h3>{stats.top_sources.map((source) => <div className="source-row" key={source.ip}><code>{source.ip}</code><span>{source.incident_count} incident</span><small>{source.threat_types.join(", ")}</small></div>)}</article>
+      {/* 🔥 Исправлено: защита от null в top_sources — главная ошибка "can't access property map" */}
+      <article className="chart-card sources"><h3>Top источники</h3>{(stats.top_sources || []).map((source) => <div className="source-row" key={source.ip}><code>{source.ip}</code><span>{source.incident_count} incident</span><small>{source.threat_types.join(", ")}</small></div>)}</article>
     </section>
   );
 }

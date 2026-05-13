@@ -94,7 +94,13 @@ func (r *LogRepo) BatchInsert(ctx context.Context, logs []domain.NetworkLog) err
 }
 func (r *LogRepo) Count(ctx context.Context) int64 {
 	var n int64
-	_ = r.db.QueryRowContext(ctx, `SELECT count() FROM network_logs`).Scan(&n)
+
+	err := r.db.QueryRowContext(ctx, `SELECT count() FROM network_logs`).Scan(&n)
+	if err != nil {
+		fmt.Printf("ERROR: clickhouse count query failed: %v\n", err)
+		return 0
+	}
+	
 	return n
 }
 func (r *LogRepo) RawSample(ctx context.Context, agentID string, limit int) []map[string]any {
