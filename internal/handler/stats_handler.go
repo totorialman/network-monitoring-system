@@ -3,18 +3,25 @@ package handler
 import (
 	"context"
 	"net/http"
+	"strconv"
+
 	"network-monitor-backend/internal/httpx"
 	"network-monitor-backend/internal/repository/postgres"
-	"time"
 )
 
-type LogCounter interface{ Count(context.Context) int64 }
-type StatsHandler struct {
-	incidents *postgres.IncidentRepo
-	logs      LogCounter
+// LogQuerier расширенный интерфейс для ClickHouse-лог-репозитория:
+// Count — для дашборда, RawSample — для «разворачивания» сырых логов инцидента.
+type LogQuerier interface {
+	Count(context.Context) int64
+	RawSample(ctx context.Context, agentID string, limit int) []map[string]any
 }
 
-func NewStatsHandler(incidents *postgres.IncidentRepo, logs LogCounter) *StatsHandler {
+type StatsHandler struct {
+	incidents *postgres.IncidentRepo
+	logs      LogQuerier
+}
+
+func NewStatsHandler(incidents *postgres.IncidentRepo, logs LogQuerier) *StatsHandler {
 	return &StatsHandler{incidents: incidents, logs: logs}
 }
 func (h *StatsHandler) Stats(w http.ResponseWriter, r *http.Request) {
@@ -46,4 +53,28 @@ func (h *StatsHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-var _ = time.Now
+// AgentLogs возвращает сырые логи из ClickHouse для указанного агента.
+// Используется фронтендом при «разворачивании» инцидента:
+// GET /api/agents/{agent_id}/logs?limit=100
+func (h *StatsHandler) AgentLogs(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("agent_id")
+	if agentID == "" {
+		httpx.Error(w, http.StatusBadRequest, "MISSING_AGENT_ID", "agent_id is required", nil)
+		return
+	}
+
+	limit := 100
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 1000 {
+			limit = parsed
+		}
+	}
+
+	logs := h.logs.RawSample(r.Context(), agentID, limit)
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"logs":  logs,
+		"total": len(logs),
+	})
+}
+
+var _ = strconv.Itoa

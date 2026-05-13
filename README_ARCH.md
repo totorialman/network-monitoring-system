@@ -1,181 +1,62 @@
 # Архитектура системы мониторинга сети
 
-## Схема передачи данных между компонентами
+## Компоненты
+
+| Компонент | Порт | Назначение |
+|-----------|------|------------|
+| **Go Backend** (`cmd/server/`) | 8080 | Приём ZIP, валидация, запись в ClickHouse, вызов ML, создание инцидентов |
+| **ml2-http-service** (FastAPI) | 5000 | Агрегация 18 признаков → Isolation Forest → классификация угроз |
+| **PostgreSQL** | 5432 | Пользователи, агенты, инциденты, алерты, аудит |
+| **ClickHouse** | 9000 | Сырые сетевые логи + материализованное представление `network_logs_hourly` |
+| **Frontend** (React + TypeScript + Nginx) | 3000 | Дашборд, инциденты, агенты, Inspector с сырыми логами |
+| **Telegram Bot** | — | Оповещения об аномалиях (best-effort) |
+
+## Конвейер данных
 
 ```
-┌──────────────┐     ZIP/traffic.json     ┌───────────────────────────────────────┐
-│   Агент       │ ────── POST ──────────► │          Go Backend (:8080)           │
-│ (OpenWRT/RPi) │     /api/agent/logs     │                                       │
-│              │                         │  1. Проверка токена агента (SHA-256)   │
-│              │                         │  2. Распаковка ZIP                     │
-│              │                         │  3. Валидация JSON-логов               │
-│              │                         │  4. Сохранение в ClickHouse            │
-│              │                         │  5. Передача сырых логов в ML2         │
-│              │                         │  6. Создание инцидента (если аномалия) │
-│              │                         │  7. Отправка Telegram (опционально)    │
-└──────────────┘                         └───────────────────────────────────────┘
-                                                   │
-                     ┌─────────────────────────────┼──────────────────────────┐
-                     │                             │                          │
-                     ▼                             ▼                          ▼
-          ┌──────────────────┐       ┌──────────────────────┐       ┌─────────────────┐
-          │   ClickHouse     │       │   ml2-http-service   │       │   PostgreSQL    │
-          │   :9000          │       │   :5000              │       │   :5432         │
-          │                  │       │                      │       │                 │
-          │ Сырые логи:      │       │ 1. Агрегация в 18    │       │ Инциденты       │
-          │ - network_logs   │       │    признаков:        │       │ Агенты          │
-          │ - network_logs_  │       │    - packet_count    │       │ Пользователи    │
-          │   hourly (MV)    │       │    - duration        │       │ Алерты          │
-          │                  │       │    - packets_per_sec │       │ Аудит           │
-          │                  │       │    - unique_src_ip   │       │                 │
-          │                  │       │    - unique_dst_port │       │                 │
-          │                  │       │    - avg_length/ttl  │       │                 │
-          │                  │       │    - proto_tcp/udp/  │       │                 │
-          │                  │       │      icmp            │       │                 │
-          │                  │       │    - unique_tcp_     │       │                 │
-          │                  │       │      flags           │       │                 │
-          │                  │       │    - icmp_count      │       │                 │
-          │                  │       │                      │       │                 │
-          │                  │       │ 2. Isolation Forest  │       │                 │
-          │                  │       │    (загружает .pkl)  │       │                 │
-          │                  │       │                      │       │                 │
-          │                  │       │ 3. Классификация:    │       │                 │
-          │                  │       │    port_scan/ddos/   │       │                 │
-          │                  │       │    anomaly           │       │                 │
-          │                  │       │                      │       │                 │
-          │                  │       │ 4. Рекомендации      │       │                 │
-          └──────────────────┘       └──────────────────────┘       └─────────────────┘
-                                                   │
-                     ┌─────────────────────────────┘
-                     │
-                     ▼
-          ┌──────────────────────┐
-          │   Telegram Bot API   │
-          │                      │
-          │ Уведомление:         │
-          │ 🚨 АНОМАЛИЯ         │
-          │ Тип: port_scan       │
-          │ Severity: 4/5        │
-          │ ML score: 0.72       │
-          │ [Расследовать]       │
-          │ [Ложное срабатывание]│
-          └──────────────────────┘
+Агент ── POST /api/agent/logs (ZIP с .json файлами, токен в Authorization) ──► Go Backend
+                                      │
+                                      ▼
+                              1. Проверка токена (SHA-256)
+                              2. Распаковка ZIP (любые .json файлы, не только traffic.json)
+                              3. Валидация JSON (обязательные поля: timestamp, src_ip, dst_ip, proto)
+                              4. Вставка ВСЕХ валидных логов в ClickHouse → таблица network_logs
+                              5. Отправка сырых логов в ml2-http-service (POST /analyze)
+                              6. ML агрегирует 18 признаков → Isolation Forest → порог 0.65
+                              7. ТОЛЬКО аномалии (is_anomaly=true) → запись в PostgreSQL incidents
+                              8. Отправка Telegram-уведомления (best-effort, c retry)
+                                      │
+                                      ▼
+                              Фронтенд:
+                              - GET /api/incidents → список инцидентов
+                              - GET /api/incidents/{id} → детали инцидента
+                              - GET /api/agents/{agent_id}/logs → СЫРЫЕ ЛОГИ из ClickHouse
+                              - GET /api/stats → агрегированная статистика
+                              - GET /api/agents → реестр агентов
 ```
 
-## Что и кому передаётся
+## REST API
 
-### 1. Агент → Go Backend
-**Что:** ZIP-архив с одним файлом `traffic.json` (массив JSON-объектов)
-**Как:** `POST /api/agent/logs` + `Authorization: Bearer <agent_token>` + multipart
-**Пример:**
-```json
-{
-  "timestamp": 1713623722.45,
-  "src_mac": "00:1A:2B:3C:4D:5E",
-  "dst_mac": "FF:FF:FF:FF:FF:FF",
-  "src_ip": "192.168.1.10",
-  "dst_ip": "10.0.0.5",
-  "src_port": 54321,
-  "dst_port": 80,
-  "proto": 6,
-  "ttl": 64,
-  "tcp_flags": "SYN",
-  "length": 64
-}
-```
+| Метод | URI | Назначение |
+|-------|-----|------------|
+| POST | `/api/auth/login` | Аутентификация администратора (JWT) |
+| POST | `/api/agent/logs` | Приём ZIP-архива от агента (Agent Auth) |
+| POST | `/api/admin/agents/tokens` | Генерация токена агента (Admin JWT) |
+| GET | `/api/agents` | Список агентов |
+| GET | `/api/agents/{agent_id}/logs` | **Сырые логи из ClickHouse для инцидента** |
+| GET | `/api/incidents` | Список инцидентов с пагинацией/фильтрацией |
+| GET | `/api/incidents/{id}` | Детали инцидента |
+| PUT | `/api/incidents/{id}/status` | Смена статуса инцидента |
+| GET | `/api/stats` | Агрегированная статистика для дашборда |
+| GET | `/healthz` | Health check |
 
-### 2. Go Backend → ClickHouse
-**Что:** Те же сырые логи, вставка батчем
-**Таблица:** `network_logs` с колонками: timestamp, agent_id, src_ip, dst_ip, src_port, dst_port, proto, ttl, length, tcp_flags, src_mac, dst_mac, icmp_type, icmp_code, vlan, eth_type
+## Ключевые соответствия ТЗ
 
-### 3. Go Backend → ml2-http-service
-**Что:** Сырые логи (не агрегированные!)
-**Как:** HTTP POST `http://ml2-http-service:5000/analyze`
-**Тело запроса:**
-```json
-{
-  "agent_id": "uuid-строкой",
-  "window_seconds": 300,
-  "start_time": "2026-05-11T12:00:00Z",
-  "end_time": "2026-05-11T12:05:00Z",
-  "logs": [
-    {
-      "timestamp": 1713623722.45,
-      "src_ip": "192.168.1.10",
-      "dst_ip": "10.0.0.5",
-      "src_port": 54321,
-      "dst_port": 80,
-      "proto": 6,
-      "ttl": 64,
-      "tcp_flags": "SYN",
-      "length": 64
-    }
-    // ... все логи за окно
-  ]
-}
-```
-
-### 4. ml2-http-service → Go Backend (ответ)
-**Что делает ml2 внутри:**
-1. Агрегирует все сырые логи в **18 признаков** (TimeWindowAggregator из ml2/)
-2. Нормализует через `StandardScaler`
-3. Запускает `Isolation Forest.predict()` (модель из `/models/anomaly_model.pkl`)
-4. Классифицирует угрозу (port_scan/ddos/anomaly)
-5. Генерирует рекомендации
-
-**Ответ:**
-```json
-{
-  "is_anomaly": true,
-  "anomaly_score": 0.7215,
-  "confidence": 0.7215,
-  "threat_type": "port_scan",
-  "recommendations": [
-    "Проверьте источник трафика...",
-    "Ограничьте источник на perimeter firewall..."
-  ]
-}
-```
-
-### 5. Go Backend → PostgreSQL
-**Что:** Инцидент (только если `is_anomaly = true`)
-**Таблица:** `incidents` с колонками: id, agent_id, threat_type, severity, status, ml_score, details (JSONB)
-
-### 6. Go Backend → Telegram (опционально)
-**Что:** Форматированное сообщение
-```text
-🚨 ОБНАРУЖЕНА АНОМАЛИЯ
-Тип: port_scan
-Серьёзность: 4/5
-Время: 2026-05-11T12:05:00Z
-Оценка ML: 0.72
-Подробности: https://monitor.local/incidents/uuid
-```
-
-### 7. Go Backend → Frontend (REST API)
-**Что:** JSON через REST эндпоинты
-
-| Endpoint | Что возвращает |
-|---|---|
-| `GET /api/stats` | overview (total/new incidents, active agents, logs, avg ML), timeseries (по часам), threat_distribution, top_sources |
-| `GET /api/incidents` | Список инцидентов с пагинацией и фильтрацией |
-| `GET /api/incidents/{id}` | Детали одного инцидента |
-| `GET /api/agents` | Список агентов с last_seen, logs_sent_today |
-
-### 8. Frontend → Пользователь (браузер)
-**Что:** Интерфейс администратора:
-- 📊 Dashboard: KPI-карточки + графики (AreaChart, PieChart, BarChart)
-- 🛡️ Инциденты: таблица с фильтрами + Inspector-панель
-- 📡 Агенты: карточки + генерация токенов
-
-## Краткий data flow (одним абзацем)
-
-> **Агент** 🡒 ZIP с JSON-логами 🡒 **Go Backend** 🡒 сохраняет в ClickHouse + отправляет сырые логи в **ml2-http-service** 🡒 ml2 сам агрегирует в 18 признаков, запускает Isolation Forest, классифицирует угрозу 🡒 возвращает `{ is_anomaly, score, threat_type }` 🡒 Go создаёт инцидент в PostgreSQL 🡒 (опционально) Telegram 🡒 Frontend отображает на дашборде.
-
-## Быстрый запуск
-
-```bash
-cp .env.example .env
-# Отредактировать .env (DB_PASSWORD, JWT_SECRET, INIT_ADMIN_PASSWORD)
-docker compose up --build -d
-open http://localhost:3000
+- **Создание админа через ENV**: `INIT_ADMIN_LOGIN`, `INIT_ADMIN_PASSWORD`
+- **Валидация JSON**: обязательные поля `timestamp`, `src_ip`, `dst_ip`, `proto`; проверка IPv4
+- **10000 логов → ClickHouse**: все валидные, без исключений
+- **ML-порог 0.65**: только аномалии попадают в incidents
+- **50 инцидентов в PostgreSQL**: только аномалии, не все 10000
+- **Разворачивание сырых логов**: `GET /api/agents/{agent_id}/logs` читает ClickHouse
+- **Telegram-уведомления**: при создании инцидента (best-effort, exponential backoff)
+- **Circuit Breaker**: для ML-сервиса (3 failures → open, 30s timeout)

@@ -100,9 +100,91 @@ func (r *LogRepo) Count(ctx context.Context) int64 {
 		fmt.Printf("ERROR: clickhouse count query failed: %v\n", err)
 		return 0
 	}
-	
+
 	return n
 }
+
+// RawSample возвращает сырые логи из ClickHouse для указанного агента.
+// Используется фронтендом для «разворачивания» инцидента и просмотра исходных данных.
 func (r *LogRepo) RawSample(ctx context.Context, agentID string, limit int) []map[string]any {
-	return []map[string]any{}
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+
+	query := fmt.Sprintf(`
+		SELECT
+			timestamp,
+			src_ip,
+			dst_ip,
+			src_port,
+			dst_port,
+			proto,
+			ttl,
+			length,
+			tcp_flags,
+			icmp_type,
+			icmp_code,
+			src_mac,
+			dst_mac,
+			vlan,
+			eth_type
+		FROM network_logs
+		WHERE agent_id = '%s'
+		ORDER BY timestamp DESC
+		LIMIT %d
+	`, agentID, limit)
+
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		fmt.Printf("ERROR: clickhouse RawSample query failed: %v\n", err)
+		return []map[string]any{}
+	}
+	defer rows.Close()
+
+	var out []map[string]any
+	for rows.Next() {
+		var (
+			timestamp                               sql.NullTime
+			srcIP, dstIP, tcpFlags, srcMAC, dstMAC, ethType string
+			srcPort, dstPort, proto, ttl, length    uint16
+			icmpType, icmpCode                      *uint8
+			vlan                                    *uint16
+		)
+		if err := rows.Scan(&timestamp, &srcIP, &dstIP, &srcPort, &dstPort, &proto, &ttl, &length, &tcpFlags, &icmpType, &icmpCode, &srcMAC, &dstMAC, &vlan, &ethType); err != nil {
+			continue
+		}
+		row := map[string]any{
+			"src_ip":    srcIP,
+			"dst_ip":    dstIP,
+			"src_port":  srcPort,
+			"dst_port":  dstPort,
+			"proto":     proto,
+			"ttl":       ttl,
+			"length":    length,
+			"tcp_flags": tcpFlags,
+			"src_mac":   srcMAC,
+			"dst_mac":   dstMAC,
+			"eth_type":  ethType,
+		}
+		if timestamp.Valid {
+			row["timestamp"] = timestamp.Time.UTC().Format("2006-01-02T15:04:05.000Z")
+		}
+		if icmpType != nil {
+			row["icmp_type"] = *icmpType
+		}
+		if icmpCode != nil {
+			row["icmp_code"] = *icmpCode
+		}
+		if vlan != nil {
+			row["vlan"] = *vlan
+		}
+		out = append(out, row)
+	}
+	if out == nil {
+		out = []map[string]any{}
+	}
+	return out
 }

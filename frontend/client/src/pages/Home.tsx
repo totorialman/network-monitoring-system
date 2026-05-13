@@ -308,6 +308,20 @@ function Agents({ token, agents, onRefresh }: { token: string; agents: Agent[]; 
 function IncidentInspector({ incident, token, onClose, onUpdated }: { incident: Incident | null; token: string; onClose: () => void; onUpdated: () => void }) {
   const [status, setStatus] = useState("investigating");
   const [comment, setComment] = useState("");
+  const [rawLogs, setRawLogs] = useState<any[] | null>(null);
+  const [logsLoading, setLogsLoading] = useState(false);
+
+  // Загружаем сырые логи из ClickHouse при открытии инцидента
+  useEffect(() => {
+    if (!incident || !token) return;
+    setRawLogs(null);
+    setLogsLoading(true);
+    apiFetch<{ logs: any[]; total: number }>(`/api/agents/${incident.agent_id}/logs?limit=100`, token)
+      .then((data) => setRawLogs(data.logs || []))
+      .catch(() => setRawLogs([]))
+      .finally(() => setLogsLoading(false));
+  }, [incident?.id]);
+
   if (!incident) return null;
   const activeIncident = incident;
   async function updateStatus(event: React.FormEvent) {
@@ -321,7 +335,7 @@ function IncidentInspector({ incident, token, onClose, onUpdated }: { incident: 
       toast.error(error instanceof Error ? error.message : "Не удалось обновить статус");
     }
   }
-  return <aside className="inspector"><div className="inspector-card"><button className="close" onClick={onClose}>×</button><p className="eyebrow">INCIDENT DETAIL</p><h2>{activeIncident.threat_type} <span className={`chip ${severityClass(activeIncident.severity)}`}>S{activeIncident.severity}</span></h2><p className="muted"><code>{activeIncident.id}</code></p><div className="detail-grid"><span>Агент</span><strong>{activeIncident.agent_name || activeIncident.agent_id}</strong><span>Создан</span><strong>{formatDate(activeIncident.created_at)}</strong><span>ML score</span><strong>{activeIncident.ml_score.toFixed(2)}</strong><span>Статус</span><strong className={`chip ${statusClass(activeIncident.status)}`}>{activeIncident.status}</strong></div><h3>Summary</h3><pre>{JSON.stringify(activeIncident.summary || {}, null, 2)}</pre><h3>Details</h3><pre>{JSON.stringify(activeIncident.details || {}, null, 2)}</pre><h3>Raw logs sample</h3><pre>{JSON.stringify(activeIncident.raw_logs_sample || [], null, 2)}</pre><form onSubmit={updateStatus} className="status-form"><select value={status} onChange={(e) => setStatus(e.target.value)}><option value="new">new</option><option value="investigating">investigating</option><option value="resolved">resolved</option><option value="false_positive">false_positive</option></select><textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Комментарий расследования" /><button className="primary-action"><CheckCircle2 size={16} /> Обновить статус</button></form></div></aside>;
+  return <aside className="inspector"><div className="inspector-card"><button className="close" onClick={onClose}>×</button><p className="eyebrow">INCIDENT DETAIL</p><h2>{activeIncident.threat_type} <span className={`chip ${severityClass(activeIncident.severity)}`}>S{activeIncident.severity}</span></h2><p className="muted"><code>{activeIncident.id}</code></p><div className="detail-grid"><span>Агент</span><strong>{activeIncident.agent_name || activeIncident.agent_id}</strong><span>Создан</span><strong>{formatDate(activeIncident.created_at)}</strong><span>ML score</span><strong>{activeIncident.ml_score.toFixed(2)}</strong><span>Статус</span><strong className={`chip ${statusClass(activeIncident.status)}`}>{activeIncident.status}</strong></div><h3>Summary</h3><pre>{JSON.stringify(activeIncident.summary || {}, null, 2)}</pre><h3>Details</h3><pre>{JSON.stringify(activeIncident.details || {}, null, 2)}</pre><h3>Сырые логи из ClickHouse</h3>{logsLoading ? <p className="muted">Загрузка сырых логов...</p> : <pre>{JSON.stringify(rawLogs || [], null, 2)}</pre>}<form onSubmit={updateStatus} className="status-form"><select value={status} onChange={(e) => setStatus(e.target.value)}><option value="new">new</option><option value="investigating">investigating</option><option value="resolved">resolved</option><option value="false_positive">false_positive</option></select><textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Комментарий расследования" /><button className="primary-action"><CheckCircle2 size={16} /> Обновить статус</button></form></div></aside>;
 }
 
 export default function Home() {

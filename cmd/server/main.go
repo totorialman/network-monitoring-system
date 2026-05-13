@@ -72,6 +72,7 @@ func main() {
 	admin.Use(mux.MiddlewareFunc(middleware.JWT(cfg.JWT.Secret)))
 	admin.HandleFunc("/admin/agents/tokens", agentH.CreateToken).Methods(http.MethodPost)
 	admin.HandleFunc("/agents", agentH.List).Methods(http.MethodGet)
+	admin.HandleFunc("/agents/{agent_id}/logs", statsH.AgentLogs).Methods(http.MethodGet)
 	admin.HandleFunc("/incidents", incH.List).Methods(http.MethodGet)
 	admin.HandleFunc("/incidents/{id}", incH.Get).Methods(http.MethodGet)
 	admin.HandleFunc("/incidents/{id}/status", incH.UpdateStatus).Methods(http.MethodPut)

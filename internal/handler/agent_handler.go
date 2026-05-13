@@ -74,41 +74,73 @@ func (h *AgentHandler) UploadLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
-	if err != nil || len(zr.File) != 1 || zr.File[0].Name != "traffic.json" {
-		httpx.Error(w, 400, "INVALID_PAYLOAD", "ZIP archive is corrupted or missing traffic.json", nil)
-		return
-	}
-	rc, err := zr.File[0].Open()
 	if err != nil {
-		httpx.Error(w, 400, "INVALID_PAYLOAD", "cannot open traffic.json", nil)
+		httpx.Error(w, 400, "INVALID_PAYLOAD", "ZIP archive is corrupted", nil)
 		return
 	}
-	defer rc.Close()
-	dec := json.NewDecoder(rc)
-	tok, err := dec.Token()
-	if err != nil || tok != json.Delim('[') {
-		httpx.Error(w, 400, "INVALID_PAYLOAD", "traffic.json must be JSON array", nil)
+
+	// Проверяем, что в архиве есть хотя бы один .json файл
+	hasJSON := false
+	for _, f := range zr.File {
+		if !f.FileInfo().IsDir() && strings.HasSuffix(strings.ToLower(f.Name), ".json") {
+			hasJSON = true
+			break
+		}
+	}
+	if !hasJSON {
+		httpx.Error(w, 400, "INVALID_PAYLOAD", "ZIP archive must contain at least one .json file", nil)
 		return
 	}
+
 	var valid []domain.NetworkLog
 	var invalid []domain.ValidationError
 	idx := 0
-	for dec.More() {
-		var raw json.RawMessage
-		if err := dec.Decode(&raw); err != nil {
-			invalid = append(invalid, domain.ValidationError{Index: idx, Reason: "json_parse_error"})
-			idx++
+
+	// Обрабатываем все .json файлы в архиве
+	for _, f := range zr.File {
+		if f.FileInfo().IsDir() {
 			continue
 		}
-		log, err := domain.ParseNetworkLog(raw, ag.ID)
+		if !strings.HasSuffix(strings.ToLower(f.Name), ".json") {
+			continue
+		}
+
+		rc, err := f.Open()
 		if err != nil {
-			invalid = append(invalid, domain.ValidationError{Index: idx, Reason: err.Error()})
-			idx++
 			continue
 		}
-		valid = append(valid, log)
-		idx++
+
+		raw, err := io.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			continue
+		}
+
+		// Пробуем распарсить как JSON-массив
+		var fileLogs []json.RawMessage
+		if err := json.Unmarshal(raw, &fileLogs); err != nil {
+			// Если не массив — пробуем как одиночный объект
+			var single json.RawMessage
+			if err2 := json.Unmarshal(raw, &single); err2 != nil {
+				invalid = append(invalid, domain.ValidationError{Index: idx, Reason: "json_parse_error"})
+				idx++
+				continue
+			}
+			fileLogs = []json.RawMessage{single}
+		}
+
+		for _, rawMsg := range fileLogs {
+			log, err := domain.ParseNetworkLog(rawMsg, ag.ID)
+			if err != nil {
+				invalid = append(invalid, domain.ValidationError{Index: idx, Reason: err.Error()})
+				idx++
+				continue
+			}
+			valid = append(valid, log)
+			idx++
+		}
 	}
+
 	if len(valid) > 0 {
 		go h.ingest.ProcessBatch(valid, ag.ID)
 	}
