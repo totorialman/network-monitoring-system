@@ -22,11 +22,52 @@ func New(cfg config.ClickHouseConfig) (*LogRepo, error) {
 func (r *LogRepo) Close() error                   { return r.db.Close() }
 func (r *LogRepo) Ping(ctx context.Context) error { return r.db.PingContext(ctx) }
 func (r *LogRepo) InitSchema(ctx context.Context) error {
-	_, err := r.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS network_logs (timestamp DateTime64(3, 'UTC') CODEC(Delta, ZSTD), agent_id UUID, src_ip IPv4, dst_ip IPv4, src_port UInt16, dst_port UInt16, proto UInt8, ttl UInt8, length UInt16, tcp_flags String, src_mac String, dst_mac String, icmp_type Nullable(UInt8), icmp_code Nullable(UInt8), vlan Nullable(UInt16), eth_type String, hour DateTime MATERIALIZED toStartOfHour(timestamp), day Date MATERIALIZED toDate(timestamp)) ENGINE = MergeTree PARTITION BY toYYYYMM(timestamp) ORDER BY (agent_id, timestamp, src_ip) TTL timestamp + INTERVAL 90 DAY SETTINGS index_granularity = 8192, compress_primary_key = true`)
+	_, err := r.db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS network_logs (
+			timestamp DateTime64(3, 'UTC') CODEC(Delta, ZSTD),
+			agent_id UUID,
+			src_ip IPv4,
+			dst_ip IPv4,
+			src_port UInt16,
+			dst_port UInt16,
+			proto UInt8,
+			ttl UInt8,
+			length UInt16,
+			tcp_flags String,
+			src_mac String,
+			dst_mac String,
+			icmp_type Nullable(UInt8),
+			icmp_code Nullable(UInt8),
+			vlan Nullable(UInt16),
+			eth_type String,
+			hour DateTime MATERIALIZED toStartOfHour(timestamp),
+			day Date MATERIALIZED toDate(timestamp)
+		) ENGINE = MergeTree
+		PARTITION BY toYYYYMM(timestamp)
+		ORDER BY (agent_id, timestamp, src_ip)
+		TTL toDateTime(timestamp) + INTERVAL 90 DAY
+		SETTINGS index_granularity = 8192, compress_primary_key = true
+	`)
 	if err != nil {
 		return err
 	}
-	_, err = r.db.ExecContext(ctx, `CREATE MATERIALIZED VIEW IF NOT EXISTS network_logs_hourly ENGINE = SummingMergeTree PARTITION BY toYYYYMM(hour) ORDER BY (agent_id, hour, src_ip) AS SELECT agent_id, toStartOfHour(timestamp) AS hour, src_ip, count() AS packet_count, uniq(dst_ip) AS unique_dst_ips, uniq(dst_port) AS unique_dst_ports, avg(length) AS avg_length, sum(length) AS total_bytes FROM network_logs GROUP BY agent_id, hour, src_ip`)
+	_, err = r.db.ExecContext(ctx, `
+		CREATE MATERIALIZED VIEW IF NOT EXISTS network_logs_hourly 
+		ENGINE = SummingMergeTree 
+		PARTITION BY toYYYYMM(hour) 
+		ORDER BY (agent_id, hour, src_ip) 
+		AS SELECT 
+			agent_id, 
+			toStartOfHour(timestamp) AS hour, 
+			src_ip, 
+			count() AS packet_count, 
+			uniq(dst_ip) AS unique_dst_ips, 
+			uniq(dst_port) AS unique_dst_ports, 
+			avg(length) AS avg_length, 
+			sum(length) AS total_bytes 
+		FROM network_logs 
+		GROUP BY agent_id, hour, src_ip
+	`)
 	return err
 }
 func (r *LogRepo) BatchInsert(ctx context.Context, logs []domain.NetworkLog) error {

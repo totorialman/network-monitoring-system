@@ -105,7 +105,7 @@ services:
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     volumes:
       - clickhouse_data:/var/lib/clickhouse
-      - ./clickhouse/config.xml:/etc/clickhouse-server/config.xml:ro
+      #- ./clickhouse/config.xml:/etc/clickhouse-server/config.xml:ro
     healthcheck:
       test: ["CMD-SHELL", "clickhouse-client --host 127.0.0.1 --port 9000 --user default --password \"$$CLICKHOUSE_PASSWORD\" --query 'SELECT 1' >/dev/null"]
       interval: 10s
