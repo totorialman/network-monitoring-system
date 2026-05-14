@@ -310,6 +310,20 @@ def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
         anomaly_score = 0.5 if is_anomaly else 0.0
         confidence = 0.5
 
+    # 2.5 Hybrid detection: если ML не заметил аномалию, но эвристики явно указывают на атаку
+    if not is_anomaly and model_bundle is not None:
+        pps = features.get("packets_per_second", 0)
+        unique_dst_ip = features.get("unique_dst_ip", 0)
+        unique_dst_ports = features.get("unique_dst_port", 0)
+
+        heuristic_ddos = pps > 1000 and unique_dst_ip <= 5
+        heuristic_portscan = unique_dst_ports > 100
+
+        if heuristic_ddos or heuristic_portscan:
+            is_anomaly = True
+            anomaly_score = max(anomaly_score, 0.65)  # пороговое значение для создания инцидента
+            confidence = 0.85  # высокая уверенность для эвристического обнаружения
+
     # 3. Классификация угрозы
     threat_type = classify_threat(features, anomaly_score) if is_anomaly else "other"
 

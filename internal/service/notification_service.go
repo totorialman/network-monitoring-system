@@ -1,4 +1,4 @@
-package service
+нтpackage service
 
 import (
 	"bytes"
@@ -31,7 +31,7 @@ func (s *NotificationService) SendTelegram(ctx context.Context, incident *domain
 	if s.cfg.BotToken == "" || s.cfg.AdminChatID == "" {
 		return nil
 	}
-	if incident.Severity*5 < s.cfg.MinSeverity || incident.MLScore*5 < s.cfg.MinScore {
+	if incident.Severity < s.cfg.MinSeverity || incident.MLScore < s.cfg.MinScore {
 		return nil
 	}
 	msg := fmt.Sprintf("🚨 ОБНАРУЖЕНА АНОМАЛИЯ\n\nТип: %s\nСерьёзность: %d/5\nВремя: %s\nОценка ML: %.2f\n\nПодробности: %s/%s", incident.ThreatType, incident.Severity, incident.CreatedAt.Format(time.RFC3339), incident.MLScore, s.cfg.BaseIncidentURL, incident.ID)

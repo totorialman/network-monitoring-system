@@ -352,20 +352,38 @@ export default function Home() {
 
   async function loadData() {
     if (!token) return;
-    try {
-      const [statsData, incidentsData, agentsData] = await Promise.all([
-        apiFetch<StatsResponse>(`/api/stats?period=${period}`, token),
-        apiFetch<{ items: Incident[] }>("/api/incidents?page=1&limit=50&sort_by=created_at&order=desc", token),
-        apiFetch<{ items: Agent[] }>("/api/agents", token),
-      ]);
-      setStats(statsData);
-      setIncidents(incidentsData.items || []);
-      setAgents(agentsData.items || []);
-      setDemoMode(false);
-    } catch (error) {
-      setDemoMode(true);
-      toast.warning("Backend недоступен или нет данных. Показан демо-срез интерфейса, API-интеграция сохранена.");
+    const maxRetries = 6;
+    const retryDelayMs = 5000;
+    let lastError: unknown = null;
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const [statsData, incidentsData, agentsData] = await Promise.all([
+          apiFetch<StatsResponse>(`/api/stats?period=${period}`, token),
+          apiFetch<{ items: Incident[] }>("/api/incidents?page=1&limit=50&sort_by=created_at&order=desc", token),
+          apiFetch<{ items: Agent[] }>("/api/agents", token),
+        ]);
+        setStats(statsData);
+        setIncidents(incidentsData.items || []);
+        setAgents(agentsData.items || []);
+        setDemoMode(false);
+        return; // Успешно — выходим
+      } catch (error) {
+        lastError = error;
+        // На предпоследней попытке показываем предупреждение
+        if (attempt === maxRetries - 2) {
+          toast.warning("Бэкенд ещё не готов, пробуем подключиться...");
+        }
+        // Ждём перед следующей попыткой (кроме последней)
+        if (attempt < maxRetries - 1) {
+          await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+        }
+      }
     }
+    // Все попытки исчерпаны — показываем демо
+    console.error("All retries exhausted, falling back to demo", lastError);
+    setDemoMode(true);
+    toast.warning("Бэкенд недоступен после 6 попыток. Показан демо-срез интерфейса.");
   }
 
   useEffect(() => { void loadData(); }, [token, period]);

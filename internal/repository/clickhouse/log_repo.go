@@ -4,12 +4,19 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sync/atomic"
+	"time"
+
 	_ "github.com/ClickHouse/clickhouse-go/v2"
 	"network-monitor-backend/internal/config"
 	"network-monitor-backend/internal/domain"
 )
 
-type LogRepo struct{ db *sql.DB }
+type LogRepo struct {
+	db              *sql.DB
+	lastKnownCount  atomic.Int64
+	lastKnownOKTime atomic.Value // time.Time
+}
 
 func New(cfg config.ClickHouseConfig) (*LogRepo, error) {
 	dsn := fmt.Sprintf("clickhouse://%s:%s@%s:%s/%s?dial_timeout=10s", cfg.User, cfg.Password, cfg.Host, cfg.Port, cfg.Database)
@@ -17,7 +24,9 @@ func New(cfg config.ClickHouseConfig) (*LogRepo, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &LogRepo{db: db}, nil
+	repo := &LogRepo{db: db}
+	repo.lastKnownOKTime.Store(time.Time{})
+	return repo, nil
 }
 func (r *LogRepo) Close() error                   { return r.db.Close() }
 func (r *LogRepo) Ping(ctx context.Context) error { return r.db.PingContext(ctx) }
@@ -92,15 +101,26 @@ func (r *LogRepo) BatchInsert(ctx context.Context, logs []domain.NetworkLog) err
 	}
 	return tx.Commit()
 }
+// Count возвращает количество сырых логов в ClickHouse.
+// При недоступности ClickHouse возвращает последнее успешно полученное значение (fallback-кэш).
 func (r *LogRepo) Count(ctx context.Context) int64 {
 	var n int64
 
 	err := r.db.QueryRowContext(ctx, `SELECT count() FROM network_logs`).Scan(&n)
 	if err != nil {
-		fmt.Printf("ERROR: clickhouse count query failed: %v\n", err)
+		fmt.Printf("ERROR: clickhouse count query failed: %v (fallback=%d)\n", err, r.lastKnownCount.Load())
+		// Если ClickHouse недоступен, возвращаем последнее известное значение
+		if cached := r.lastKnownCount.Load(); cached > 0 {
+			return cached
+		}
 		return 0
 	}
 
+	// Обновляем кэш при успешном запросе (но не чаще чем раз в 30 секунд)
+	if prev := r.lastKnownOKTime.Load().(time.Time); time.Since(prev) > 30*time.Second {
+		r.lastKnownCount.Store(n)
+		r.lastKnownOKTime.Store(time.Now())
+	}
 	return n
 }
 
