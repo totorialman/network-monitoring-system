@@ -136,6 +136,12 @@ func (r *IncidentRepo) Get(ctx context.Context, id uuid.UUID) (*domain.Incident,
 	return &in, nil
 }
 func (r *IncidentRepo) UpdateStatus(ctx context.Context, id, userID uuid.UUID, status string) error {
+	var resolvedBy interface{}
+	if userID == uuid.Nil {
+		resolvedBy = nil
+	} else {
+		resolvedBy = userID
+	}
 	_, err := r.db.ExecContext(ctx, `UPDATE incidents
 SET
     status = $1::varchar(30),
@@ -147,7 +153,7 @@ SET
         WHEN $1::varchar(30) IN ('resolved','false_positive') THEN $2::uuid
         ELSE resolved_by
     END
-WHERE id = $3::uuid`, status, userID, id)
+WHERE id = $3::uuid`, status, resolvedBy, id)
 	return err
 }
 
