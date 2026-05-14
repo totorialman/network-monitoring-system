@@ -165,7 +165,7 @@ func RegisterWebhook(cfg config.TelegramConfig, logger *zap.Logger) {
 		return
 	}
 
-	webhookURL := strings.TrimRight(cfg.BaseIncidentURL, "/incidents") + "/api/telegram/webhook"
+	webhookURL := strings.TrimSuffix(cfg.BaseIncidentURL, "/incidents") + "/api/telegram/webhook"
 
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/setWebhook", cfg.BotToken)
 	payload := map[string]any{
