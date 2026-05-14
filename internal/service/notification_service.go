@@ -1,4 +1,4 @@
-нтpackage service
+package service
 
 import (
 	"bytes"
