@@ -87,6 +87,7 @@ class AnalyzeResponse(BaseModel):
     anomaly_score: float
     confidence: float
     threat_type: str
+    detection_method: str = "none"
     recommendations: List[str] = []
 
 
@@ -281,6 +282,7 @@ def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
             anomaly_score=0.0,
             confidence=0.0,
             threat_type="other",
+            detection_method="none",
             recommendations=[],
         )
 
@@ -291,6 +293,7 @@ def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
     is_anomaly = False
     anomaly_score = 0.0
     confidence = 0.0
+    detection_method = "none"
 
     if model_bundle:
         x = _vector_from_features(features)
@@ -304,14 +307,11 @@ def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
         is_anomaly = prediction == -1
         anomaly_score = round(float(min(max(raw_score, 0.0), 1.0)), 4)
         confidence = round(float(min(max(abs(raw_score), 0.0), 1.0)), 4)
-    else:
-        # Если модель не загружена, используем эвристики
-        is_anomaly = features.get("packets_per_second", 0) > 500 or features.get("unique_dst_port", 0) > 50
-        anomaly_score = 0.5 if is_anomaly else 0.0
-        confidence = 0.5
+        if is_anomaly:
+            detection_method = "ml"
 
     # 2.5 Hybrid detection: эвристики как fallback (работает всегда, даже без модели)
-    if not is_anomaly:
+    if not is_anomaly or detection_method == "none":
         pps = features.get("packets_per_second", 0)
         unique_dst_ip = features.get("unique_dst_ip", 0)
         unique_dst_ports = features.get("unique_dst_port", 0)
@@ -320,9 +320,13 @@ def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
         heuristic_portscan = unique_dst_ports > 50
 
         if heuristic_ddos or heuristic_portscan:
-            is_anomaly = True
-            anomaly_score = max(anomaly_score, 0.65)  # пороговое значение для создания инцидента
-            confidence = 0.85  # высокая уверенность для эвристического обнаружения
+            if not is_anomaly:
+                is_anomaly = True
+                # Не завышаем anomaly_score — оставляем тот, что дала ML-модель (близкий к 0)
+                # но инцидент всё равно создаётся благодаря флагу is_anomaly
+            detection_method = "heuristic"
+            if confidence < 0.85:
+                confidence = 0.85
 
     # 3. Классификация угрозы
     threat_type = classify_threat(features, anomaly_score) if is_anomaly else "other"
@@ -335,5 +339,6 @@ def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
         anomaly_score=anomaly_score,
         confidence=confidence,
         threat_type=threat_type,
+        detection_method=detection_method,
         recommendations=recommendations,
     )

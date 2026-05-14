@@ -276,10 +276,10 @@ function Dashboard({ stats, period, setPeriod }: { stats: StatsResponse; period:
         <h3>Типы угроз</h3>
         <ResponsiveContainer width="100%" height={260}>
           <PieChart>
-            <Pie data={distribution} dataKey="value" nameKey="name" innerRadius={60} outerRadius={95}>
+            <Pie data={distribution} dataKey="value" nameKey="name" innerRadius={60} outerRadius={95} label={{ fill: '#e2e8f0', fontSize: 12 }}>
               {distribution.map((_, index) => <Cell key={index} fill={colors[index % colors.length]} />)}
             </Pie>
-            <Tooltip contentStyle={{ background: "#07111d", border: "1px solid #164e63", color: "#e2e8f0" }} />
+            <Tooltip contentStyle={{ background: "#07111d", border: "1px solid #164e63", color: "#e2e8f0" }} labelStyle={{ color: "#e2e8f0" }} />
           </PieChart>
         </ResponsiveContainer>
         <div className="legend-list">{distribution.map((item, index) => <span key={item.name}><i style={{ background: colors[index % colors.length] }} />{item.name}: {item.value}</span>)}</div>

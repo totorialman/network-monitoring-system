@@ -134,7 +134,7 @@ func (r *LogRepo) RawSample(ctx context.Context, agentID string, limit int) []ma
 		limit = 1000
 	}
 
-	query := fmt.Sprintf(`
+	rows, err := r.db.QueryContext(ctx, `
 		SELECT
 			timestamp,
 			src_ip,
@@ -152,12 +152,10 @@ func (r *LogRepo) RawSample(ctx context.Context, agentID string, limit int) []ma
 			vlan,
 			eth_type
 		FROM network_logs
-		WHERE agent_id = '%s'
+		WHERE agent_id = $1
 		ORDER BY timestamp DESC
-		LIMIT %d
+		LIMIT $2
 	`, agentID, limit)
-
-	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
 		fmt.Printf("ERROR: clickhouse RawSample query failed: %v\n", err)
 		return []map[string]any{}

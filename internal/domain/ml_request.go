@@ -31,9 +31,10 @@ type AnalyzeRequest struct {
 }
 
 type AnalyzeResponse struct {
-	IsAnomaly      bool     `json:"is_anomaly"`
-	AnomalyScore   float64  `json:"anomaly_score"`
-	Confidence     float64  `json:"confidence"`
-	ThreatType     string   `json:"threat_type"`
+	IsAnomaly       bool     `json:"is_anomaly"`
+	AnomalyScore    float64  `json:"anomaly_score"`
+	Confidence      float64  `json:"confidence"`
+	ThreatType      string   `json:"threat_type"`
+	DetectionMethod string   `json:"detection_method"`
 	Recommendations []string `json:"recommendations,omitempty"`
 }

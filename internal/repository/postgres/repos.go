@@ -116,7 +116,7 @@ func (r *IncidentRepo) List(ctx context.Context, f IncidentFilters) ([]domain.In
 			return nil, 0, err
 		}
 		_ = json.Unmarshal(details, &in.Details)
-		in.Summary = in.Details
+		in.Summary = buildSummary(in.Details)
 		out = append(out, in)
 	}
 	return out, total, rows.Err()
@@ -132,6 +132,7 @@ func (r *IncidentRepo) Get(ctx context.Context, id uuid.UUID) (*domain.Incident,
 		return nil, err
 	}
 	_ = json.Unmarshal(details, &in.Details)
+	in.Summary = buildSummary(in.Details)
 	return &in, nil
 }
 func (r *IncidentRepo) UpdateStatus(ctx context.Context, id, userID uuid.UUID, status string) error {
@@ -155,9 +156,16 @@ func (r *IncidentRepo) Stats(ctx context.Context, period string) (map[string]any
 	interval := periodToInterval(period)
 	res := map[string]any{}
 
-	_ = r.db.QueryRowContext(ctx,
+	var totalInc, newInc, avgML float64
+	err := r.db.QueryRowContext(ctx,
 		fmt.Sprintf(`SELECT COUNT(*), COUNT(*) FILTER (WHERE status='new'), COALESCE(AVG(ml_score),0) FROM incidents WHERE created_at > NOW() - INTERVAL '%s'`, interval),
-	).Scan(ptr(&res, "total_incidents"), ptr(&res, "new_incidents"), ptr(&res, "avg_ml_score"))
+	).Scan(&totalInc, &newInc, &avgML)
+	if err != nil {
+		return nil, err
+	}
+	res["total_incidents"] = totalInc
+	res["new_incidents"] = newInc
+	res["avg_ml_score"] = avgML
 
 	var active int64
 	_ = r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agents WHERE status='active'`).Scan(&active)
@@ -183,18 +191,19 @@ func (r *IncidentRepo) Stats(ctx context.Context, period string) (map[string]any
 // Timeseries возвращает агрегированные данные по часам с фильтром по периоду.
 func (r *IncidentRepo) Timeseries(ctx context.Context, period string) []map[string]any {
 	interval := periodToInterval(period)
+	trunc := periodTrunc(period)
 	var out []map[string]any
 	rows, err := r.db.QueryContext(ctx,
 		fmt.Sprintf(`
 			SELECT
-				date_trunc('hour', created_at) AS bucket,
+				date_trunc('%s', created_at) AS bucket,
 				COUNT(*) AS incident_count,
 				COALESCE(AVG(severity), 0) AS avg_severity
 			FROM incidents
 			WHERE created_at > NOW() - INTERVAL '%s'
 			GROUP BY bucket
 			ORDER BY bucket ASC
-		`, interval),
+		`, trunc, interval),
 	)
 	if err != nil {
 		return out
@@ -309,7 +318,52 @@ func safe(v string, allowed map[string]bool, fallback string) string {
 }
 func ptr(m *map[string]any, key string) any { var v float64; (*m)[key] = v; return &v }
 
+// buildSummary создаёт краткую агрегированную сводку из детальных признаков инцидента.
+func buildSummary(details map[string]any) map[string]any {
+	if details == nil {
+		return map[string]any{}
+	}
+	summary := map[string]any{}
+	if v, ok := details["log_count"]; ok {
+		summary["log_count"] = v
+	}
+	if v, ok := details["anomaly_score"]; ok {
+		summary["anomaly_score"] = v
+	}
+	if v, ok := details["detection_method"]; ok {
+		summary["detection_method"] = v
+	}
+	if v, ok := details["top_dst_ports"]; ok {
+		summary["top_dst_ports"] = v
+	}
+	if v, ok := details["top_suspicious_ips"]; ok {
+		summary["top_suspicious_ips"] = v
+	}
+	if v, ok := details["packets_per_second"]; ok {
+		summary["packets_per_second"] = v
+	}
+	return summary
+}
+
 // periodToInterval конвертирует период в SQL-интервал.
+// periodTrunc возвращает шаг агрегации для timeseries в зависимости от периода.
+func periodTrunc(period string) string {
+	switch period {
+	case "1h":
+		return "minute"
+	case "6h":
+		return "minute"
+	case "24h":
+		return "hour"
+	case "7d":
+		return "hour"
+	case "30d":
+		return "day"
+	default:
+		return "hour"
+	}
+}
+
 func periodToInterval(period string) string {
 	switch period {
 	case "1h":

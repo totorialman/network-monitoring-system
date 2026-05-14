@@ -56,7 +56,7 @@ func main() {
 	ingest := service.NewLogIngestService(clickhouse, incidents, mlClient, notifications, logger, cfg.ML.WindowSizeSeconds)
 	authH := handler.NewAuthHandler(authSvc)
 	agentH := handler.NewAgentHandler(agents, ingest)
-	incH := handler.NewIncidentHandler(incidents)
+	incH := handler.NewIncidentHandler(incidents, clickhouse)
 	statsH := handler.NewStatsHandler(incidents, clickhouse)
 	healthH := handler.NewHealthHandler(pg, clickhouse, mlClient, cfg.App.Version)
 	r := mux.NewRouter()

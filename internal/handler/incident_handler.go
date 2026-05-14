@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -13,10 +14,13 @@ import (
 	"strconv"
 )
 
-type IncidentHandler struct{ incidents *postgres.IncidentRepo }
+type IncidentHandler struct {
+	incidents *postgres.IncidentRepo
+	logs      LogQuerier
+}
 
-func NewIncidentHandler(incidents *postgres.IncidentRepo) *IncidentHandler {
-	return &IncidentHandler{incidents: incidents}
+func NewIncidentHandler(incidents *postgres.IncidentRepo, logs LogQuerier) *IncidentHandler {
+	return &IncidentHandler{incidents: incidents, logs: logs}
 }
 func (h *IncidentHandler) List(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
@@ -44,7 +48,11 @@ func (h *IncidentHandler) Get(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, 404, "NOT_FOUND", "Incident not found", nil)
 		return
 	}
-	httpx.JSON(w, 200, map[string]any{"id": inc.ID, "agent_id": inc.AgentID, "agent_name": inc.AgentName, "created_at": inc.CreatedAt, "threat_type": inc.ThreatType, "severity": inc.Severity, "status": inc.Status, "ml_score": inc.MLScore, "details": inc.Details, "raw_logs_sample": []any{}, "timeline": []map[string]any{{"timestamp": inc.CreatedAt, "event": "incident_created"}}})
+	rawLogsSample := []map[string]any{}
+	if h.logs != nil {
+		rawLogsSample = h.logs.RawSample(context.Background(), inc.AgentID.String(), 20)
+	}
+	httpx.JSON(w, 200, map[string]any{"id": inc.ID, "agent_id": inc.AgentID, "agent_name": inc.AgentName, "created_at": inc.CreatedAt, "threat_type": inc.ThreatType, "severity": inc.Severity, "status": inc.Status, "ml_score": inc.MLScore, "summary": inc.Summary, "details": inc.Details, "raw_logs_sample": rawLogsSample, "timeline": []map[string]any{{"timestamp": inc.CreatedAt, "event": "incident_created"}}})
 }
 func (h *IncidentHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(mux.Vars(r)["id"])
