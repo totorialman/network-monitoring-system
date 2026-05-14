@@ -20,14 +20,16 @@ type TelegramHandler struct {
 	cfg       config.TelegramConfig
 	logger    *zap.Logger
 	client    *http.Client
+	wsHub     *WsHub
 }
 
-func NewTelegramHandler(incidents *postgres.IncidentRepo, cfg config.TelegramConfig, logger *zap.Logger) *TelegramHandler {
+func NewTelegramHandler(incidents *postgres.IncidentRepo, cfg config.TelegramConfig, logger *zap.Logger, wsHub *WsHub) *TelegramHandler {
 	return &TelegramHandler{
 		incidents: incidents,
 		cfg:       cfg,
 		logger:    logger,
 		client:    &http.Client{},
+		wsHub:     wsHub,
 	}
 }
 
@@ -135,6 +137,14 @@ func (h *TelegramHandler) handleCallback(cb *callbackQuery) {
 		zap.String("status", status),
 		zap.String("user", userName),
 	)
+
+	// Оповещаем фронтенд через WebSocket
+	if h.wsHub != nil {
+		h.wsHub.Broadcast(map[string]any{
+			"type":    "incident_updated",
+			"payload": map[string]any{"incident_id": incidentID.String(), "status": status},
+		})
+	}
 }
 
 // answerCallback отправляет ответ на callback_query (всплывающее уведомление).

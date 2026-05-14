@@ -63,7 +63,7 @@ func main() {
 	authH := handler.NewAuthHandler(authSvc)
 	agentH := handler.NewAgentHandler(agents, ingest)
 	incH := handler.NewIncidentHandler(incidents, clickhouse)
-	telegramH := handler.NewTelegramHandler(incidents, cfg.Telegram, logger)
+	telegramH := handler.NewTelegramHandler(incidents, cfg.Telegram, logger, wsHub)
 	statsH := handler.NewStatsHandler(incidents, clickhouse)
 	healthH := handler.NewHealthHandler(pg, clickhouse, mlClient, cfg.App.Version)
 

@@ -432,6 +432,10 @@ export default function Home() {
             toast.info(`Новый инцидент: ${threatLabel(msg.payload?.threat_type || "")} (${msg.payload?.log_count || 0} логов)`);
             loadData();
           }
+          if (msg.type === "incident_updated") {
+            toast.info(`Статус инцидента обновлён: ${statusLabel(msg.payload?.status || "")}`);
+            loadData();
+          }
         } catch { /* ignore */ }
       };
       ws.onclose = () => {
