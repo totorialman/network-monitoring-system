@@ -1,7 +1,7 @@
 /*
 Design philosophy: Swiss Cybernetic Control Room.
 */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -25,7 +25,6 @@ import {
 } from "recharts";
 import { toast } from "sonner";
 
-const HERO_IMAGE = "";
 const GRID_IMAGE = "";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
@@ -68,8 +67,6 @@ type Incident = {
   ml_score: number;
   summary?: Record<string, number>;
   details?: Record<string, unknown>;
-  raw_logs_sample?: unknown[];
-  timeline?: Array<Record<string, unknown>>;
 };
 
 type Agent = {
@@ -83,73 +80,11 @@ type Agent = {
 };
 
 const demoStats: StatsResponse = {
-  overview: {
-    total_incidents: 45,
-    new_incidents: 12,
-    active_agents: 8,
-    total_logs_processed: 2500000,
-    avg_ml_score: 0.34,
-  },
-  timeseries: [
-    { timestamp: "2026-05-11T00:00:00Z", incident_count: 3, log_volume: 45000, avg_severity: 2.5 },
-    { timestamp: "2026-05-11T03:00:00Z", incident_count: 5, log_volume: 76000, avg_severity: 3.1 },
-    { timestamp: "2026-05-11T06:00:00Z", incident_count: 2, log_volume: 41000, avg_severity: 2.2 },
-    { timestamp: "2026-05-11T09:00:00Z", incident_count: 8, log_volume: 98000, avg_severity: 4.0 },
-    { timestamp: "2026-05-11T12:00:00Z", incident_count: 7, log_volume: 115000, avg_severity: 3.7 },
-    { timestamp: "2026-05-11T15:00:00Z", incident_count: 12, log_volume: 151000, avg_severity: 4.4 },
-  ],
-  threat_distribution: { "DDoS": 5, "Сканирование портов": 28, "Аномалия": 10, "Трафик": 2 },
-  top_sources: [
-    { ip: "192.168.1.100", incident_count: 8, threat_types: ["port_scan"] },
-    { ip: "10.10.4.17", incident_count: 5, threat_types: ["ddos", "anomaly"] },
-    { ip: "172.16.8.44", incident_count: 4, threat_types: ["anomaly"] },
-  ],
+  overview: { total_incidents: 0, new_incidents: 0, active_agents: 0, total_logs_processed: 0, avg_ml_score: 0 },
+  timeseries: [],
+  threat_distribution: {},
+  top_sources: [],
 };
-
-const demoIncidents: Incident[] = [
-  {
-    id: "f2b74f24-7e51-43b2-9b37-0d3d99f741aa",
-    agent_id: "agent-1",
-    agent_name: "router-office-1",
-    created_at: "2026-05-11T12:05:00Z",
-    threat_type: "port_scan",
-    severity: 4,
-    status: "new",
-    ml_score: 0.72,
-    summary: { unique_src_ips: 1, unique_dst_ports: 150, packet_count: 5000, time_window_sec: 300 },
-    details: { top_dst_ports: [22, 80, 443, 3389, 8080], packets_per_second: 16.67, entropy_dst_ports: 0.92 },
-  },
-  {
-    id: "a9e11140-222a-4b4c-9858-2c2d3e274612",
-    agent_id: "agent-2",
-    agent_name: "edge-dmz-2",
-    created_at: "2026-05-11T13:28:00Z",
-    threat_type: "ddos",
-    severity: 5,
-    status: "investigating",
-    ml_score: 0.91,
-    summary: { unique_src_ips: 840, unique_dst_ports: 2, packet_count: 98000, time_window_sec: 300 },
-    details: { packets_per_second: 326.7, entropy_dst_ports: 0.16 },
-  },
-  {
-    id: "c6d69044-2f98-47af-a155-97b1a02e3640",
-    agent_id: "agent-3",
-    agent_name: "branch-gateway-3",
-    created_at: "2026-05-11T14:12:00Z",
-    threat_type: "anomaly",
-    severity: 3,
-    status: "new",
-    ml_score: 0.64,
-    summary: { unique_src_ips: 12, unique_dst_ports: 32, packet_count: 12000, time_window_sec: 300 },
-    details: { packets_per_second: 40, entropy_dst_ports: 0.67 },
-  },
-];
-
-const demoAgents: Agent[] = [
-  { id: "agent-1", name: "router-office-1", token_prefix: "a8c921f0...", last_seen: "2026-05-11T14:55:00Z", status: "active", logs_sent_today: 144, last_incident_at: "2026-05-11T12:05:00Z" },
-  { id: "agent-2", name: "edge-dmz-2", token_prefix: "f114e7aa...", last_seen: "2026-05-11T15:01:00Z", status: "active", logs_sent_today: 221, last_incident_at: "2026-05-11T13:28:00Z" },
-  { id: "agent-3", name: "branch-gateway-3", token_prefix: "92bd0cc1...", last_seen: "2026-05-11T13:48:00Z", status: "active", logs_sent_today: 98, last_incident_at: "2026-05-11T14:12:00Z" },
-];
 
 function authHeaders(token: string) {
   return { Authorization: `Bearer ${token}` };
@@ -196,20 +131,14 @@ function statusClass(status: string) {
 
 function statusLabel(status: string): string {
   const map: Record<string, string> = {
-    new: "Новый",
-    investigating: "Расследование",
-    resolved: "Решён",
-    false_positive: "Ложное срабатывание",
+    new: "Новый", investigating: "Расследование", resolved: "Решён", false_positive: "Ложное срабатывание",
   };
   return map[status] || status;
 }
 
 function threatLabel(t: string): string {
   const map: Record<string, string> = {
-    ddos: "DDoS",
-    port_scan: "Сканирование портов",
-    anomaly: "Аномалия",
-    traffic: "Трафик",
+    ddos: "DDoS", port_scan: "Сканирование портов", anomaly: "Аномалия", traffic: "Трафик",
   };
   return map[t] || t;
 }
@@ -225,18 +154,13 @@ function LoginScreen({ onLogin }: { onLogin: (token: string) => void }) {
     event.preventDefault();
     setLoading(true);
     try {
-      const data = await apiFetch<{ token: string }>("/api/auth/login", undefined, {
-        method: "POST",
-        body: JSON.stringify({ login, password }),
-      });
+      const data = await apiFetch<{ token: string }>("/api/auth/login", undefined, { method: "POST", body: JSON.stringify({ login, password }) });
       localStorage.setItem("nm_jwt", data.token);
       onLogin(data.token);
       toast.success("Авторизация выполнена");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Не удалось авторизоваться");
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   }
 
   return (
@@ -466,16 +390,13 @@ export default function Home() {
   const [token, setToken] = useState(() => localStorage.getItem("nm_jwt") || "");
   const [section, setSection] = useState<"dashboard" | "incidents" | "agents">("dashboard");
   const [stats, setStats] = useState<StatsResponse>(demoStats);
-  const [incidents, setIncidents] = useState<Incident[]>(demoIncidents);
-  const [agents, setAgents] = useState<Agent[]>(demoAgents);
+  const [incidents, setIncidents] = useState<Incident[]>([]);
+  const [agents, setAgents] = useState<Agent[]>([]);
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
   const [period, setPeriod] = useState("24h");
   const [demoMode, setDemoMode] = useState(false);
 
   const criticalCount = useMemo(() => incidents.filter((i) => i.severity >= 4 && i.status !== "resolved").length, [incidents]);
-
-  const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadData = useCallback(async () => {
     if (!token) return;
@@ -490,23 +411,20 @@ export default function Home() {
       setAgents(agentsData.items || []);
       setDemoMode(false);
     } catch (error) {
-      console.error("Failed to load data, using demo", error);
+      console.error("Failed to load data", error);
       setDemoMode(true);
-      toast.warning("Бэкенд недоступен. Показаны демо-данные.");
     }
   }, [token, period]);
 
-  // WebSocket
+  // WebSocket — токен передаётся через query-параметр ?token=
   useEffect(() => {
     if (!token) return;
     let ws: WebSocket;
     let reconnectTimer: ReturnType<typeof setTimeout>;
 
     function connect() {
-      ws = new WebSocket(`${WS_BASE_URL}/api/ws`);
-      ws.onopen = () => {
-        ws.send(JSON.stringify({ type: "auth", token }));
-      };
+      const wsUrl = `${WS_BASE_URL}/api/ws?token=${encodeURIComponent(token)}`;
+      ws = new WebSocket(wsUrl);
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
@@ -514,7 +432,7 @@ export default function Home() {
             toast.info(`Новый инцидент: ${threatLabel(msg.payload?.threat_type || "")} (${msg.payload?.log_count || 0} логов)`);
             loadData();
           }
-        } catch { /* ignore malformed messages */ }
+        } catch { /* ignore */ }
       };
       ws.onclose = () => {
         reconnectTimer = setTimeout(connect, 5000);
@@ -522,7 +440,6 @@ export default function Home() {
       ws.onerror = () => {
         ws.close();
       };
-      wsRef.current = ws;
     }
 
     connect();

@@ -2,13 +2,14 @@ package middleware
 
 import (
 	"context"
-	"github.com/google/uuid"
 	"net/http"
+	"strings"
+
+	"github.com/google/uuid"
 	"network-monitor-backend/internal/domain"
 	"network-monitor-backend/internal/httpx"
 	"network-monitor-backend/internal/pkg/hash"
 	jwtutil "network-monitor-backend/internal/pkg/jwt"
-	"strings"
 )
 
 type ctxKey string
@@ -25,7 +26,7 @@ type AgentRepository interface {
 func JWT(secret string) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			token := bearer(r)
+			token := bearerOrQuery(r)
 			if token == "" {
 				httpx.Error(w, http.StatusUnauthorized, "AUTH_REQUIRED", "Valid authorization token required", nil)
 				return
@@ -59,6 +60,21 @@ func AgentAuth(repo AgentRepository) Middleware {
 		})
 	}
 }
+
+// bearerOrQuery извлекает JWT из заголовка Authorization или query-параметра ?token=.
+// Нужно для WebSocket, где JavaScript WebSocket API не поддерживает кастомные заголовки.
+func bearerOrQuery(r *http.Request) string {
+	token := bearer(r)
+	if token != "" {
+		return token
+	}
+	// Пробуем query-параметр
+	if q := r.URL.Query().Get("token"); q != "" {
+		return q
+	}
+	return ""
+}
+
 func bearer(r *http.Request) string {
 	h := r.Header.Get("Authorization")
 	if !strings.HasPrefix(h, "Bearer ") {
