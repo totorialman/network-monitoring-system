@@ -3,21 +3,22 @@ package main
 import (
 	"context"
 	"database/sql"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
 	"github.com/gorilla/mux"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 	"go.uber.org/zap"
-	"net/http"
 	"network-monitor-backend/internal/config"
 	"network-monitor-backend/internal/handler"
 	"network-monitor-backend/internal/middleware"
 	chrepo "network-monitor-backend/internal/repository/clickhouse"
 	pgrepo "network-monitor-backend/internal/repository/postgres"
 	"network-monitor-backend/internal/service"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
 )
 
 func main() {
@@ -53,21 +54,37 @@ func main() {
 	}
 	mlClient := service.NewMLClient(cfg.ML.ServiceURL, cfg.ML.Timeout)
 	notifications := service.NewNotificationService(cfg.Telegram, alerts, logger)
-	ingest := service.NewLogIngestService(clickhouse, incidents, mlClient, notifications, logger, cfg.ML.WindowSizeSeconds)
+
+	// WebSocket-хаб для broadcast'а событий фронтенду
+	wsHub := handler.NewWsHub(logger)
+
+	ingest := service.NewLogIngestService(clickhouse, incidents, mlClient, notifications, wsHub, logger, cfg.ML.WindowSizeSeconds)
+
 	authH := handler.NewAuthHandler(authSvc)
 	agentH := handler.NewAgentHandler(agents, ingest)
 	incH := handler.NewIncidentHandler(incidents, clickhouse)
 	statsH := handler.NewStatsHandler(incidents, clickhouse)
 	healthH := handler.NewHealthHandler(pg, clickhouse, mlClient, cfg.App.Version)
+
 	r := mux.NewRouter()
 	r.Use(mux.MiddlewareFunc(middleware.Recover(logger)))
 	r.Use(mux.MiddlewareFunc(middleware.Logging(logger)))
+
 	r.HandleFunc("/healthz", healthH.Healthz).Methods(http.MethodGet)
+
 	api := r.PathPrefix("/api").Subrouter()
+
+	// WebSocket endpoint (JWT-защищён)
+	wsRouter := api.PathPrefix("/ws").Subrouter()
+	wsRouter.Use(mux.MiddlewareFunc(middleware.JWT(cfg.JWT.Secret)))
+	wsRouter.HandleFunc("", wsHub.ServeWs).Methods(http.MethodGet)
+
 	api.HandleFunc("/auth/login", authH.Login).Methods(http.MethodPost)
+
 	agentAPI := api.PathPrefix("/agent").Subrouter()
 	agentAPI.Use(mux.MiddlewareFunc(middleware.AgentAuth(agents)))
 	agentAPI.HandleFunc("/logs", agentH.UploadLogs).Methods(http.MethodPost)
+
 	admin := api.PathPrefix("").Subrouter()
 	admin.Use(mux.MiddlewareFunc(middleware.JWT(cfg.JWT.Secret)))
 	admin.HandleFunc("/admin/agents/tokens", agentH.CreateToken).Methods(http.MethodPost)
@@ -77,6 +94,7 @@ func main() {
 	admin.HandleFunc("/incidents/{id}", incH.Get).Methods(http.MethodGet)
 	admin.HandleFunc("/incidents/{id}/status", incH.UpdateStatus).Methods(http.MethodPut)
 	admin.HandleFunc("/stats", statsH.Stats).Methods(http.MethodGet)
+
 	srv := &http.Server{Addr: ":" + cfg.App.Port, Handler: r, ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		logger.Info("backend started", zap.String("addr", srv.Addr))
@@ -84,6 +102,7 @@ func main() {
 			logger.Fatal("server error", zap.Error(err))
 		}
 	}()
+
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	<-stop

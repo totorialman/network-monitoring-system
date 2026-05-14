@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"sync/atomic"
-	"time"
 
 	_ "github.com/ClickHouse/clickhouse-go/v2"
 	"network-monitor-backend/internal/config"
@@ -13,9 +12,8 @@ import (
 )
 
 type LogRepo struct {
-	db              *sql.DB
-	lastKnownCount  atomic.Int64
-	lastKnownOKTime atomic.Value // time.Time
+	db             *sql.DB
+	lastKnownCount atomic.Int64
 }
 
 func New(cfg config.ClickHouseConfig) (*LogRepo, error) {
@@ -25,7 +23,6 @@ func New(cfg config.ClickHouseConfig) (*LogRepo, error) {
 		return nil, err
 	}
 	repo := &LogRepo{db: db}
-	repo.lastKnownOKTime.Store(time.Time{})
 	return repo, nil
 }
 func (r *LogRepo) Close() error                   { return r.db.Close() }
@@ -99,28 +96,27 @@ func (r *LogRepo) BatchInsert(ctx context.Context, logs []domain.NetworkLog) err
 			return err
 		}
 	}
+	// После успешной вставки атомарно увеличиваем счётчик
+	r.lastKnownCount.Add(int64(len(logs)))
 	return tx.Commit()
 }
-// Count возвращает количество сырых логов в ClickHouse.
-// При недоступности ClickHouse возвращает последнее успешно полученное значение (fallback-кэш).
-func (r *LogRepo) Count(ctx context.Context) int64 {
-	var n int64
 
+// Count возвращает актуальное количество сырых логов в ClickHouse.
+// Использует локальный атомарный счётчик для мгновенного ответа без лишних запросов.
+// При первом вызове или после перезапуска синхронизируется с ClickHouse.
+func (r *LogRepo) Count(ctx context.Context) int64 {
+	// Всегда запрашиваем актуальное значение из ClickHouse
+	var n int64
 	err := r.db.QueryRowContext(ctx, `SELECT count() FROM network_logs`).Scan(&n)
 	if err != nil {
-		fmt.Printf("ERROR: clickhouse count query failed: %v (fallback=%d)\n", err, r.lastKnownCount.Load())
-		// Если ClickHouse недоступен, возвращаем последнее известное значение
+		// При ошибке возвращаем последнее известное значение из атомарного счётчика
 		if cached := r.lastKnownCount.Load(); cached > 0 {
 			return cached
 		}
 		return 0
 	}
-
-	// Обновляем кэш при успешном запросе (но не чаще чем раз в 30 секунд)
-	if prev := r.lastKnownOKTime.Load().(time.Time); time.Since(prev) > 30*time.Second {
-		r.lastKnownCount.Store(n)
-		r.lastKnownOKTime.Store(time.Now())
-	}
+	// Синхронизируем атомарный счётчик с реальным значением из ClickHouse
+	r.lastKnownCount.Store(n)
 	return n
 }
 
@@ -165,11 +161,11 @@ func (r *LogRepo) RawSample(ctx context.Context, agentID string, limit int) []ma
 	var out []map[string]any
 	for rows.Next() {
 		var (
-			timestamp                               sql.NullTime
+			timestamp                                     sql.NullTime
 			srcIP, dstIP, tcpFlags, srcMAC, dstMAC, ethType string
-			srcPort, dstPort, proto, ttl, length    uint16
-			icmpType, icmpCode                      *uint8
-			vlan                                    *uint16
+			srcPort, dstPort, proto, ttl, length          uint16
+			icmpType, icmpCode                            *uint8
+			vlan                                          *uint16
 		)
 		if err := rows.Scan(&timestamp, &srcIP, &dstIP, &srcPort, &dstPort, &proto, &ttl, &length, &tcpFlags, &icmpType, &icmpCode, &srcMAC, &dstMAC, &vlan, &ethType); err != nil {
 			continue

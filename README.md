@@ -1,116 +1,178 @@
-# Network Traffic Monitoring System
+# Система мониторинга сетевого трафика
 
-**Версия проекта:** 2.0.0 (ml2)
+**Версия:** 2.1.0
 
-## Назначение проекта
+## Назначение
 
-Проект реализует систему мониторинга сетевого трафика по ТЗ. В состав входят **React frontend для администратора**, **Go backend**, **PostgreSQL**, **ClickHouse** и отдельный **Python ML2-сервис**. 
+Автоматизированная система приёма, хранения и анализа событий сетевого трафика. Агенты (OpenWRT/RPi) отправляют ZIP-архивы с логами, бэкенд на Go сохраняет их в ClickHouse, ML-сервис на Python выполняет анализ аномалий, а веб-панель на React отображает дашборд, инциденты и список агентов с обновлением в реальном времени через WebSocket.
 
-Система принимает ZIP-архивы с сетевыми событиями от агентов, валидирует и сохраняет сырые логи в ClickHouse, передаёт их в ML2-сервис (который сам агрегирует признаки и запускает Isolation Forest), создаёт инциденты в PostgreSQL и отображает результаты в web-панели с авторизацией, графиками, карточками инцидентов и управлением агентами.
-
-> **Ключевая идея архитектуры:** PostgreSQL — транзакционные сущности (пользователи, агенты, инциденты, алерты, аудит). ClickHouse — высокообъёмные события сетевого трафика. ML2-сервис — отдельный Python/FastAPI контейнер, который принимает **сырые логи**, сам агрегирует их в 18 признаков (как в ml2/TimeWindowAggregator) и запускает Isolation Forest. Классификация угроз (port_scan, ddos, anomaly) выполняется также в ML2-сервисе. Frontend обслуживается через Nginx и проксирует `/api` в backend внутри общей Docker-сети (same-origin, без CORS).
-
-## Состав репозитория
-
-| Путь | Назначение |
-|---|---|
-| `frontend` | React/Vite frontend: авторизация, dashboard, инциденты, агенты. |
-| `cmd/server` | Точка входа Go backend и Dockerfile. |
-| `internal/config` | Загрузка конфигурации из ENV. |
-| `internal/domain` | Доменные структуры: пользователи, агенты, логи, запросы. |
-| `internal/handler` | HTTP-обработчики REST API. |
-| `internal/middleware` | JWT-аутентификация, авторизация агента, логирование, recovery. |
-| `internal/repository/postgres` | PostgreSQL-репозитории и embedded SQL миграции. |
-| `internal/repository/clickhouse` | ClickHouse-репозиторий для хранения сетевых логов. |
-| `internal/service` | Auth, log ingestion, ML-client, Telegram notifications. |
-| `ml2-http-service` | Python FastAPI ML2-сервис (Isolation Forest, 18 признаков, классификация угроз). |
-| `ml2` | Автономный ML-агент для обучения модели на pcap-файлах или захвата с интерфейса. |
-| `clickhouse/config.xml` | Конфигурация ClickHouse. |
-| `docker-compose.yml` | Общий Compose-файл для всех сервисов. |
-
-## Технологический стек
+## Состав
 
 | Компонент | Технология | Роль |
 |---|---|---|
-| Frontend | React 19, Vite, TypeScript, Recharts | Web-панель администратора. |
-| Frontend runtime | Nginx 1.27 Alpine | Отдача SPA + proxy `/api` к backend. |
-| Backend | Go 1.21, Gorilla Mux, pgx, goose | REST API, авторизация, валидация, ingestion. |
-| OLTP-хранилище | PostgreSQL 15 | Пользователи, агенты, инциденты, алерты, аудит. |
-| Event-хранилище | ClickHouse 23.3 | Хранение и аналитика сетевых логов. |
-| ML2-сервис | Python 3.11, FastAPI, scikit-learn | Детекция аномалий (Isolation Forest) + классификация угроз. |
-| Автономный ML2 | Python 3.7+, scapy, scikit-learn | Обучение модели на pcap-файлах или захват с интерфейса. |
-| Оркестрация | Docker Compose | Запуск всех сервисов одной командой. |
+| Frontend | React 19, Vite, TypeScript, Recharts, Nginx | Веб-панель администратора |
+| Backend | Go 1.21, Gorilla Mux, pgx, goose | REST API, авторизация, приём логов, WebSocket |
+| PostgreSQL | 15 Alpine | Пользователи, агенты, инциденты, алерты, аудит |
+| ClickHouse | 23.3 Alpine | Сырые сетевые логи + материализованные представления |
+| ML2-сервис | Python 3.11, FastAPI, scikit-learn | Детекция аномалий (Isolation Forest) |
+| Оркестрация | Docker Compose | Единый запуск всех сервисов |
 
-## Быстрый запуск через Docker Compose
+## Быстрый старт (локально)
 
 ```bash
-# 1. Создать .env из шаблона
+# 1. Клонировать репозиторий
+git clone https://github.com/totorialman/network-monitoring-system.git
+cd network-monitoring-system
+
+# 2. Настроить переменные окружения
 cp .env.example .env
+# Отредактировать .env — обязательно сменить:
+#   DB_PASSWORD, CLICKHOUSE_PASSWORD, JWT_SECRET, INIT_ADMIN_PASSWORD
 
-# 2. Отредактировать .env — обязательно сменить:
-#    DB_PASSWORD, CLICKHOUSE_PASSWORD, JWT_SECRET, INIT_ADMIN_PASSWORD
-
-# 3. Запустить все сервисы
+# 3. Запустить
 docker compose up --build -d
 
-# 4. Открыть в браузере
-open http://localhost:3000
+# 4. Открыть
+# http://localhost:3000
+# Логин: admin (из INIT_ADMIN_LOGIN)
+# Пароль: из INIT_ADMIN_PASSWORD в .env
 ```
 
-| Поле | Значение по умолчанию |
-|---|---|
-| Логин | admin (из `INIT_ADMIN_LOGIN`) |
-| Пароль | из `INIT_ADMIN_PASSWORD` в `.env` |
-| Frontend | `http://localhost:3000` |
-| Backend API | `http://localhost:8080` (через Nginx same-origin `/api`) |
+## Порты
 
-Проверить состояние:
+| Сервис | Внутренний | Хост | Назначение |
+|---|---|---|---|
+| Frontend (Nginx) | 3000 | 3000 | SPA + прокси `/api` и `/api/ws` |
+| Backend (Go) | 8080 | 8080 | REST API + WebSocket |
+| PostgreSQL | 5432 | 5432 | Транзакционное хранилище |
+| ClickHouse HTTP | 8123 | 8123 | HTTP-интерфейс |
+| ClickHouse Native | 9000 | 9000 | Native-интерфейс |
+| ML2-сервис | 5000 | 5001 | FastAPI |
+
+## WebSocket
+
+Фронтенд подключается к `/api/ws` через JWT-токен. При создании нового инцидента бэкенд рассылает событие `new_incident` всем подключённым клиентам. Фронтенд автоматически обновляет дашборд без перезагрузки.
+
+## Развёртывание на сервере с публичным доменом
+
+### 1. Подготовка сервера
 
 ```bash
-curl http://localhost:8080/healthz
+# Ubuntu 22.04 / Debian 12
+apt update && apt install -y docker.io docker-compose-v2 nginx certbot python3-certbot-nginx
+systemctl enable --now docker
 ```
 
-## Порты сервисов
+### 2. Клонирование и настройка
 
-| Сервис | Контейнер | Порт хоста | Назначение |
-|---|---|---|---:|
-| Frontend | `nm-frontend` | `3000` | Web-панель администратора. |
-| Backend | `nm-backend` | `8080` | REST API и healthcheck. |
-| PostgreSQL | `nm-postgres` | `5432` | Транзакционное хранилище. |
-| ClickHouse HTTP | `nm-clickhouse` | `8123` | HTTP-интерфейс ClickHouse. |
-| ClickHouse native | `nm-clickhouse` | `9000` | Native-интерфейс ClickHouse. |
-| ML2-сервис | `nm-ml2-http` | `5001` | FastAPI ML2 endpoint. |
+```bash
+cd /opt
+git clone https://github.com/totorialman/network-monitoring-system.git
+cd network-monitoring-system
+
+# Создать .env
+cat > .env << 'EOF'
+DB_PASSWORD=<сгенерируйте_надёжный_пароль>
+CLICKHOUSE_PASSWORD=<сгенерируйте_надёжный_пароль>
+JWT_SECRET=<сгенерируйте_секрет_минимум_32_символа>
+INIT_ADMIN_LOGIN=admin
+INIT_ADMIN_PASSWORD=<сгенерируйте_надёжный_пароль>
+BASE_INCIDENT_URL=https://monitor.example.com/incidents
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_ADMIN_CHAT_ID=
+TELEGRAM_MIN_SEVERITY=3
+TELEGRAM_MIN_ML_SCORE=0.6
+EOF
+```
+
+### 3. Запуск контейнеров
+
+```bash
+docker compose up --build -d
+```
+
+### 4. Настройка Nginx как reverse proxy с HTTPS
+
+```bash
+# Создать конфиг сайта
+cat > /etc/nginx/sites-available/network-monitor << 'EOF'
+server {
+    listen 80;
+    server_name monitor.example.com;  # замените на ваш домен
+
+    # Все запросы проксируются на frontend-контейнер
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+}
+EOF
+
+ln -s /etc/nginx/sites-available/network-monitor /etc/nginx/sites-enabled/
+rm -f /etc/nginx/sites-enabled/default
+nginx -t && systemctl reload nginx
+```
+
+### 5. Получение SSL-сертификата
+
+```bash
+certbot --nginx -d monitor.example.com
+# Сертификат будет автоматически обновляться
+```
+
+### 6. Проверка
+
+```bash
+# Healthcheck
+curl https://monitor.example.com/healthz
+
+# Статистика (требуется JWT)
+curl -X POST https://monitor.example.com/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"login":"admin","password":"<ваш_пароль>"}'
+```
+
+## Переменные окружения
+
+| Переменная | Назначение | По умолчанию |
+|---|---|---|
+| `DB_PASSWORD` | Пароль PostgreSQL | **обязательно** |
+| `CLICKHOUSE_PASSWORD` | Пароль ClickHouse | **обязательно** |
+| `JWT_SECRET` | Секрет для JWT-токенов | **обязательно** |
+| `INIT_ADMIN_LOGIN` | Логин начального администратора | `admin` |
+| `INIT_ADMIN_PASSWORD` | Пароль начального администратора | **обязательно** |
+| `TELEGRAM_BOT_TOKEN` | Токен Telegram-бота | (необязательно) |
+| `TELEGRAM_ADMIN_CHAT_ID` | ID чата для уведомлений | (необязательно) |
+| `TELEGRAM_MIN_SEVERITY` | Минимальная критичность для уведомлений | `3` |
+| `TELEGRAM_MIN_ML_SCORE` | Минимальный ML-скор для уведомлений | `0.6` |
+| `BASE_INCIDENT_URL` | Базовый URL инцидентов для ссылок в Telegram | `https://monitor.local/incidents` |
+| `ML_WINDOW_SECONDS` | Размер временного окна для ML-агрегации | `300` |
 
 ## REST API
 
-### Авторизация администратора
+| Метод | URI | Назначение | Аутентификация |
+|---|---|---|---|
+| POST | `/api/auth/login` | Вход администратора | — |
+| POST | `/api/agent/logs` | Загрузка ZIP с логами | Agent Token |
+| POST | `/api/admin/agents/tokens` | Создание токена агента | Admin JWT |
+| GET | `/api/agents` | Список агентов | Admin JWT |
+| GET | `/api/agents/{id}/logs` | Сырые логи агента из ClickHouse | Admin JWT |
+| GET | `/api/incidents` | Список инцидентов | Admin JWT |
+| GET | `/api/incidents/{id}` | Детали инцидента | Admin JWT |
+| PUT | `/api/incidents/{id}/status` | Смена статуса инцидента | Admin JWT |
+| GET | `/api/stats` | Агрегированная статистика | Admin JWT |
+| GET | `/api/ws` | WebSocket-подключение | Admin JWT |
+| GET | `/healthz` | Проверка здоровья | — |
 
-```bash
-curl -X POST http://localhost:8080/api/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"login":"admin","password":"ChangeMe123!"}'
-```
-
-### Создание токена агента
-
-```bash
-ADMIN_TOKEN='<jwt_from_login>'
-curl -X POST http://localhost:8080/api/admin/agents/tokens \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-  -H 'Content-Type: application/json' \
-  -d '{"agent_name":"office-gateway-1"}'
-```
-
-### Загрузка логов агентом
-
-```bash
-AGENT_TOKEN='<agent_token>'
-curl -X POST http://localhost:8080/api/agent/logs \
-  -H "Authorization: Bearer ${AGENT_TOKEN}" \
-  -F 'archive=@traffic.zip'
-```
-
-Минимальный элемент `traffic.json`:
+## Формат логов (traffic.json)
 
 ```json
 {
@@ -126,72 +188,10 @@ curl -X POST http://localhost:8080/api/agent/logs \
 }
 ```
 
-### Инциденты
-
-```bash
-curl "http://localhost:8080/api/incidents?page=1&limit=20&status=new" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}"
-
-# Смена статуса
-curl -X PUT "http://localhost:8080/api/incidents/${INCIDENT_ID}/status" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-  -H 'Content-Type: application/json' \
-  -d '{"status":"investigating","comment":"Взято в работу"}'
-```
-
-### Статистика
-
-```bash
-curl http://localhost:8080/api/stats \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}"
-```
-
-## Архитектура передачи данных
-
-```
-Агент (OpenWRT/RPi)
-  └─► ZIP/traffic.json
-         └─► POST /api/agent/logs (Go backend)
-                ├─► ClickHouse (сохранение сырых логов)
-                └─► POST /analyze → ml2-http-service
-                       │ 1. Агрегация → 18 признаков (TimeWindowAggregator)
-                       │ 2. Isolation Forest (модель /models/anomaly_model.pkl)
-                       │ 3. Классификация: port_scan | ddos | anomaly
-                       └─► { is_anomaly, anomaly_score, confidence, threat_type, recommendations }
-                └─► Создание incident в PostgreSQL
-                └─► Отправка Telegram (опционально)
-```
-
-## ML2-сервис
-
-ML2-сервис (ml2-http-service) загружает предобученную модель Isolation Forest из `/models/anomaly_model.pkl`. При первом запуске, если модели нет, сервис работает, но ML-анализ недоступен (используются эвристики).
-
-| Endpoint | Метод | Назначение |
-|---|---|---|
-| `/health` | GET | Проверка готовности и загрузки модели. |
-| `/analyze` | POST | Принимает `{ agent_id, window_seconds, logs: [...] }`. Возвращает `{ is_anomaly, anomaly_score, confidence, threat_type, recommendations }`. |
-
-### Обучение модели
-
-Вы можете обучить модель на реальном трафике через `ml2/`:
-
-```bash
-# Обучение из pcap-файла
-cd ml2
-pip install -r requirements.txt
-python main.py --mode train --pcap /path/to/dump.pcap --model /models/anomaly_model.pkl
-```
-
-Затем скопировать `.pkl` в volume `/models` — ml2-http-service подхватит её автоматически.
-
-## Миграции и схема данных
-
-Миграции PostgreSQL встроены в бинарный файл backend через `embed.FS` и применяются при старте. ClickHouse-схема создаётся через `CREATE TABLE IF NOT EXISTS`.
-
-| Хранилище | Таблицы |
-|---|---|
-| PostgreSQL | `users`, `agents`, `incidents`, `alerts`, `audit_log` |
-| ClickHouse | `network_logs` (с материализованным представлением `network_logs_hourly`) |
+Поддерживаются также:
+- `tcp_flags` — строка (`"SYN"`) или число (`2`)
+- `src_mac`, `dst_mac`, `vlan`, `eth_type`, `icmp_type`, `icmp_code` — опциональны, могут быть `null`
+- Массивы JSON-объектов в одном файле
 
 ## Остановка и очистка
 
@@ -199,5 +199,18 @@ python main.py --mode train --pcap /path/to/dump.pcap --model /models/anomaly_mo
 # Остановка
 docker compose down
 
-# Остановка + удаление данных
+# Остановка с удалением данных
 docker compose down -v
+```
+
+## Готовность к продакшену
+
+- [x] Все сервисы в Docker Compose с healthcheck'ами
+- [x] Nginx как reverse proxy (внутренний + внешний с HTTPS)
+- [x] WebSocket для реального времени
+- [x] Автоматические миграции PostgreSQL при старте
+- [x] ClickHouse со сжатием и TTL (90 дней)
+- [x] Circuit Breaker для ML-сервиса
+- [x] Fallback на эвристики при недоступности ML
+- [x] Интерфейс полностью на русском языке
+- [x] Все логи создают инциденты (независимо от ML-оценки)
