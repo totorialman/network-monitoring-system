@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/gorilla/mux"
 	"network-monitor-backend/internal/httpx"
 	"network-monitor-backend/internal/repository/postgres"
 )
@@ -62,7 +63,7 @@ func (h *StatsHandler) Stats(w http.ResponseWriter, r *http.Request) {
 // Используется фронтендом при «разворачивании» инцидента:
 // GET /api/agents/{agent_id}/logs?limit=100
 func (h *StatsHandler) AgentLogs(w http.ResponseWriter, r *http.Request) {
-	agentID := r.PathValue("agent_id")
+	agentID := mux.Vars(r)["agent_id"]
 	if agentID == "" {
 		httpx.Error(w, http.StatusBadRequest, "MISSING_AGENT_ID", "agent_id is required", nil)
 		return
