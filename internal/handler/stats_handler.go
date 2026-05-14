@@ -26,17 +26,22 @@ func NewStatsHandler(incidents *postgres.IncidentRepo, logs LogQuerier) *StatsHa
 }
 func (h *StatsHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	st, err := h.incidents.Stats(ctx)
+	period := r.URL.Query().Get("period")
+	if period == "" {
+		period = "24h"
+	}
+
+	st, err := h.incidents.Stats(ctx, period)
 	if err != nil {
 		httpx.Error(w, 500, "STATS_FAILED", err.Error(), nil)
 		return
 	}
 
 	// Получаем timeseries из БД
-	timeseries := h.incidents.Timeseries(ctx)
+	timeseries := h.incidents.Timeseries(ctx, period)
 
 	// Получаем top_sources из БД
-	topSources := h.incidents.TopSources(ctx)
+	topSources := h.incidents.TopSources(ctx, period)
 
 	overview := map[string]any{
 		"total_incidents":      st["total_incidents"],

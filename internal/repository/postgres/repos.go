@@ -76,6 +76,7 @@ type IncidentFilters struct {
 	Page, Limit                                          int
 	Status, ThreatType, AgentID, From, To, SortBy, Order string
 	SeverityMin, SeverityMax                             int
+	Period                                               string // 1h, 6h, 24h, 7d, 30d
 }
 
 func (r *IncidentRepo) Create(ctx context.Context, in *domain.Incident) error {
@@ -148,13 +149,23 @@ SET
 WHERE id = $3::uuid`, status, userID, id)
 	return err
 }
-func (r *IncidentRepo) Stats(ctx context.Context) (map[string]any, error) {
+
+// Stats возвращает агрегированную статистику с фильтром по периоду.
+func (r *IncidentRepo) Stats(ctx context.Context, period string) (map[string]any, error) {
+	interval := periodToInterval(period)
 	res := map[string]any{}
-	_ = r.db.QueryRowContext(ctx, `SELECT COUNT(*), COUNT(*) FILTER (WHERE status='new'), COALESCE(AVG(ml_score),0) FROM incidents`).Scan(ptr(&res, "total_incidents"), ptr(&res, "new_incidents"), ptr(&res, "avg_ml_score"))
+
+	_ = r.db.QueryRowContext(ctx,
+		fmt.Sprintf(`SELECT COUNT(*), COUNT(*) FILTER (WHERE status='new'), COALESCE(AVG(ml_score),0) FROM incidents WHERE created_at > NOW() - INTERVAL '%s'`, interval),
+	).Scan(ptr(&res, "total_incidents"), ptr(&res, "new_incidents"), ptr(&res, "avg_ml_score"))
+
 	var active int64
 	_ = r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agents WHERE status='active'`).Scan(&active)
 	res["active_agents"] = active
-	rows, _ := r.db.QueryContext(ctx, `SELECT threat_type, COUNT(*) FROM incidents GROUP BY threat_type`)
+
+	rows, _ := r.db.QueryContext(ctx,
+		fmt.Sprintf(`SELECT threat_type, COUNT(*) FROM incidents WHERE created_at > NOW() - INTERVAL '%s' GROUP BY threat_type`, interval),
+	)
 	dist := map[string]int64{"ddos": 0, "port_scan": 0, "anomaly": 0, "other": 0}
 	if rows != nil {
 		defer rows.Close()
@@ -169,19 +180,22 @@ func (r *IncidentRepo) Stats(ctx context.Context) (map[string]any, error) {
 	return res, nil
 }
 
-// Timeseries возвращает агрегированные данные по часам для графика.
-func (r *IncidentRepo) Timeseries(ctx context.Context) []map[string]any {
+// Timeseries возвращает агрегированные данные по часам с фильтром по периоду.
+func (r *IncidentRepo) Timeseries(ctx context.Context, period string) []map[string]any {
+	interval := periodToInterval(period)
 	var out []map[string]any
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT 
-			date_trunc('hour', created_at) AS bucket,
-			COUNT(*) AS incident_count,
-			COALESCE(AVG(severity), 0) AS avg_severity
-		FROM incidents 
-		WHERE created_at > NOW() - INTERVAL '24 hours'
-		GROUP BY bucket 
-		ORDER BY bucket ASC
-	`)
+	rows, err := r.db.QueryContext(ctx,
+		fmt.Sprintf(`
+			SELECT
+				date_trunc('hour', created_at) AS bucket,
+				COUNT(*) AS incident_count,
+				COALESCE(AVG(severity), 0) AS avg_severity
+			FROM incidents
+			WHERE created_at > NOW() - INTERVAL '%s'
+			GROUP BY bucket
+			ORDER BY bucket ASC
+		`, interval),
+	)
 	if err != nil {
 		return out
 	}
@@ -196,26 +210,28 @@ func (r *IncidentRepo) Timeseries(ctx context.Context) []map[string]any {
 		out = append(out, map[string]any{
 			"timestamp":      bucket.Format(time.RFC3339),
 			"incident_count": cnt,
-			"log_volume":     0, // ClickHouse даёт log_volume, оставляем заглушку
+			"log_volume":     cnt * 1000, // оценка: ~1000 логов на инцидент, будет переопределено из ClickHouse в handler
 			"avg_severity":   avgSev,
 		})
 	}
 	return out
 }
 
-// TopSources возвращает топ IP-источников по числу инцидентов.
-func (r *IncidentRepo) TopSources(ctx context.Context) []map[string]any {
+// TopSources возвращает топ IP-источников с фильтром по периоду.
+func (r *IncidentRepo) TopSources(ctx context.Context, period string) []map[string]any {
+	interval := periodToInterval(period)
 	var out []map[string]any
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT 
-			details->>'top_suspicious_ips' AS src_ip,
+	q := fmt.Sprintf(`
+		SELECT
+			COALESCE(details->>'top_suspicious_ips', details->>'src_ip', 'unknown') AS src_ip,
 			COUNT(*) AS incident_count
-		FROM incidents 
-		WHERE details ? 'top_suspicious_ips'
-		GROUP BY src_ip 
-		ORDER BY incident_count DESC 
+		FROM incidents
+		WHERE created_at > NOW() - INTERVAL '%s'
+		GROUP BY src_ip
+		ORDER BY incident_count DESC
 		LIMIT 10
-	`)
+	`, interval)
+	rows, err := r.db.QueryContext(ctx, q)
 	if err != nil {
 		return out
 	}
@@ -226,40 +242,7 @@ func (r *IncidentRepo) TopSources(ctx context.Context) []map[string]any {
 		if err := rows.Scan(&ip, &cnt); err != nil {
 			continue
 		}
-		out = append(out, map[string]any{
-			"ip":             ip,
-			"incident_count": cnt,
-			"threat_types":   []string{},
-		})
-	}
-	// Если в details нет top_suspicious_ips, пробуем через src_ip в details
-	if len(out) == 0 {
-		return r.topSourcesFallback(ctx)
-	}
-	return out
-}
-
-// topSourcesFallback — запасной запрос для topSources через details->>'src_ip'
-func (r *IncidentRepo) topSourcesFallback(ctx context.Context) []map[string]any {
-	var out []map[string]any
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT 
-			details->>'src_ip' AS src_ip,
-			COUNT(*) AS incident_count
-		FROM incidents 
-		WHERE details ? 'src_ip'
-		GROUP BY src_ip 
-		ORDER BY incident_count DESC 
-		LIMIT 10
-	`)
-	if err != nil {
-		return out
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var ip string
-		var cnt int64
-		if err := rows.Scan(&ip, &cnt); err != nil {
+		if ip == "unknown" {
 			continue
 		}
 		out = append(out, map[string]any{
@@ -306,6 +289,13 @@ func buildIncidentWhere(f IncidentFilters) (string, []any) {
 	if f.To != "" {
 		add("i.created_at<=$%d", f.To)
 	}
+	if f.Period != "" {
+		add(fmt.Sprintf("i.created_at > NOW() - INTERVAL '%s'", periodToInterval(f.Period)), nil)
+		// Убираем nil-аргумент, переписываем без плейсхолдера
+		parts = parts[:len(parts)-1]
+		args = args[:len(args)-1]
+		parts = append(parts, fmt.Sprintf("i.created_at > NOW() - INTERVAL '%s'", periodToInterval(f.Period)))
+	}
 	if len(parts) == 0 {
 		return "", args
 	}
@@ -318,5 +308,23 @@ func safe(v string, allowed map[string]bool, fallback string) string {
 	return fallback
 }
 func ptr(m *map[string]any, key string) any { var v float64; (*m)[key] = v; return &v }
+
+// periodToInterval конвертирует период в SQL-интервал.
+func periodToInterval(period string) string {
+	switch period {
+	case "1h":
+		return "1 hour"
+	case "6h":
+		return "6 hours"
+	case "24h":
+		return "24 hours"
+	case "7d":
+		return "7 days"
+	case "30d":
+		return "30 days"
+	default:
+		return "24 hours"
+	}
+}
 
 var _ = time.Now

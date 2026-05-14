@@ -1,5 +1,5 @@
 /*
-Design philosophy: Swiss Cybernetic Control Room. This page uses a dark SOC/NOC dashboard aesthetic with strict typography, operational density, signal colors, thin telemetry grids, and asymmetric analytics panels.
+Design philosophy: Swiss Cybernetic Control Room.
 */
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -16,29 +16,15 @@ import {
   RefreshCw,
   Search,
   ShieldAlert,
-  ShieldCheck,
   TerminalSquare,
   UserRound,
 } from "lucide-react";
 import {
-  Area,
-  AreaChart,
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  Line,
-  LineChart,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
+  Area, AreaChart, Bar, BarChart, CartesianGrid, Cell,
+  Line, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import { toast } from "sonner";
 
-// 🔥 Исправлено: пустые строки вместо неработающих CDN-ссылок
 const HERO_IMAGE = "";
 const GRID_IMAGE = "";
 const ORBIT_IMAGE = "";
@@ -245,7 +231,6 @@ function LoginScreen({ onLogin }: { onLogin: (token: string) => void }) {
         </form>
         <div className="login-footnote"><TerminalSquare size={16} /> API endpoint: <code>{API_BASE_URL || "same-origin /api"}</code></div>
       </section>
-      <aside className="orbit-card"><img src={ORBIT_IMAGE} alt="Network threat orbit" /><div><strong>ML anomaly score</strong><span>Isolation Forest service telemetry</span></div></aside>
     </main>
   );
 }
@@ -254,22 +239,71 @@ function MetricCard({ icon, label, value, hint, tone = "cyan" }: { icon: React.R
   return <article className={`metric-card tone-${tone}`}>{icon}<div><span>{label}</span><strong>{value}</strong><small>{hint}</small></div></article>;
 }
 
+const PERIOD_LABELS: Record<string, string> = { "1h": "1 час", "6h": "6 часов", "24h": "24 часа", "7d": "7 дней", "30d": "30 дней" };
+
 function Dashboard({ stats, period, setPeriod }: { stats: StatsResponse; period: string; setPeriod: (v: string) => void }) {
-  // 🔥 Исправлено: защита от null в threat_distribution
   const distribution = Object.entries(stats.threat_distribution || {}).map(([name, value]) => ({ name, value }));
   const colors = ["#22d3ee", "#f59e0b", "#ef4444", "#94a3b8"];
   return (
     <section className="dashboard-grid">
-      <div className="section-head wide"><div><p className="eyebrow">LIVE TELEMETRY</p><h2>Dashboard-графики и агрегированная статистика</h2></div><select value={period} onChange={(e) => setPeriod(e.target.value)}><option value="1h">1h</option><option value="6h">6h</option><option value="24h">24h</option><option value="7d">7d</option><option value="30d">30d</option></select></div>
-      <MetricCard icon={<ShieldAlert />} label="Всего инцидентов" value={formatNumber(stats.overview.total_incidents)} hint="за выбранный период" tone="amber" />
+      <div className="section-head wide">
+        <div><p className="eyebrow">LIVE TELEMETRY</p><h2>Dashboard — {PERIOD_LABELS[period] || period}</h2></div>
+        <select value={period} onChange={(e) => setPeriod(e.target.value)}>
+          <option value="1h">1h</option><option value="6h">6h</option><option value="24h">24h</option><option value="7d">7d</option><option value="30d">30d</option>
+        </select>
+      </div>
+      <MetricCard icon={<ShieldAlert />} label="Всего инцидентов" value={formatNumber(stats.overview.total_incidents)} hint={`за ${PERIOD_LABELS[period] || period}`} tone="amber" />
       <MetricCard icon={<AlertTriangle />} label="Новые" value={formatNumber(stats.overview.new_incidents)} hint="требуют реакции" tone="red" />
       <MetricCard icon={<RadioTower />} label="Активные агенты" value={formatNumber(stats.overview.active_agents)} hint="последняя активность" />
       <MetricCard icon={<Activity />} label="Логов обработано" value={formatNumber(stats.overview.total_logs_processed)} hint={`avg ML ${stats.overview.avg_ml_score.toFixed(2)}`} />
-      <article className="chart-card large"><h3>Инциденты и объем логов</h3><ResponsiveContainer width="100%" height={310}><AreaChart data={stats.timeseries || []}><defs><linearGradient id="volume" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#22d3ee" stopOpacity={0.35}/><stop offset="95%" stopColor="#22d3ee" stopOpacity={0}/></linearGradient></defs><CartesianGrid stroke="#1e3a4a" strokeDasharray="3 3" /><XAxis dataKey="timestamp" tickFormatter={(v) => new Date(v).getHours() + ":00"} stroke="#7dd3fc" /><YAxis stroke="#64748b" /><Tooltip contentStyle={{ background: "#07111d", border: "1px solid #164e63", color: "#e2e8f0" }} /><Area type="monotone" dataKey="log_volume" stroke="#22d3ee" fill="url(#volume)" /><Line type="monotone" dataKey="incident_count" stroke="#f59e0b" strokeWidth={2} /></AreaChart></ResponsiveContainer></article>
-      <article className="chart-card"><h3>Типы угроз</h3><ResponsiveContainer width="100%" height={260}><PieChart><Pie data={distribution} dataKey="value" nameKey="name" innerRadius={60} outerRadius={95}>{distribution.map((_, index) => <Cell key={index} fill={colors[index % colors.length]} />)}</Pie><Tooltip contentStyle={{ background: "#07111d", border: "1px solid #164e63", color: "#e2e8f0" }} /></PieChart></ResponsiveContainer><div className="legend-list">{distribution.map((item, index) => <span key={item.name}><i style={{ background: colors[index % colors.length] }} />{item.name}: {item.value}</span>)}</div></article>
-      <article className="chart-card"><h3>Средняя критичность</h3><ResponsiveContainer width="100%" height={260}><BarChart data={stats.timeseries}><CartesianGrid stroke="#1e3a4a" strokeDasharray="3 3" /><XAxis dataKey="timestamp" tickFormatter={(v) => new Date(v).getHours() + ":00"} stroke="#7dd3fc" /><YAxis stroke="#64748b" /><Tooltip contentStyle={{ background: "#07111d", border: "1px solid #164e63", color: "#e2e8f0" }} /><Bar dataKey="avg_severity" fill="#f59e0b" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></article>
-      {/* 🔥 Исправлено: защита от null в top_sources — главная ошибка "can't access property map" */}
-      <article className="chart-card sources"><h3>Top источники</h3>{(stats.top_sources || []).map((source) => <div className="source-row" key={source.ip}><code>{source.ip}</code><span>{source.incident_count} incident</span><small>{source.threat_types.join(", ")}</small></div>)}</article>
+
+      <article className="chart-card large">
+        <h3>Инциденты и объём логов</h3>
+        <ResponsiveContainer width="100%" height={310}>
+          <AreaChart data={stats.timeseries || []}>
+            <defs><linearGradient id="volume" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#22d3ee" stopOpacity={0.35} /><stop offset="95%" stopColor="#22d3ee" stopOpacity={0} /></linearGradient></defs>
+            <CartesianGrid stroke="#1e3a4a" strokeDasharray="3 3" />
+            <XAxis dataKey="timestamp" tickFormatter={(v: string) => new Date(v).getHours() + ":00"} stroke="#7dd3fc" />
+            <YAxis stroke="#64748b" />
+            <Tooltip contentStyle={{ background: "#07111d", border: "1px solid #164e63", color: "#e2e8f0" }} labelFormatter={(v: string) => new Date(v).toLocaleString("ru-RU")} />
+            <Area type="monotone" dataKey="log_volume" stroke="#22d3ee" fill="url(#volume)" name="Логи" />
+            <Line type="monotone" dataKey="incident_count" stroke="#f59e0b" strokeWidth={2} name="Инциденты" />
+          </AreaChart>
+        </ResponsiveContainer>
+      </article>
+
+      <article className="chart-card">
+        <h3>Типы угроз</h3>
+        <ResponsiveContainer width="100%" height={260}>
+          <PieChart>
+            <Pie data={distribution} dataKey="value" nameKey="name" innerRadius={60} outerRadius={95}>
+              {distribution.map((_, index) => <Cell key={index} fill={colors[index % colors.length]} />)}
+            </Pie>
+            <Tooltip contentStyle={{ background: "#07111d", border: "1px solid #164e63", color: "#e2e8f0" }} />
+          </PieChart>
+        </ResponsiveContainer>
+        <div className="legend-list">{distribution.map((item, index) => <span key={item.name}><i style={{ background: colors[index % colors.length] }} />{item.name}: {item.value}</span>)}</div>
+      </article>
+
+      <article className="chart-card">
+        <h3>Средняя критичность</h3>
+        <ResponsiveContainer width="100%" height={260}>
+          <BarChart data={stats.timeseries}>
+            <CartesianGrid stroke="#1e3a4a" strokeDasharray="3 3" />
+            <XAxis dataKey="timestamp" tickFormatter={(v: string) => new Date(v).getHours() + ":00"} stroke="#7dd3fc" />
+            <YAxis stroke="#64748b" />
+            <Tooltip contentStyle={{ background: "#07111d", border: "1px solid #164e63", color: "#e2e8f0" }} />
+            <Bar dataKey="avg_severity" fill="#f59e0b" radius={[4, 4, 0, 0]} name="Severity" />
+          </BarChart>
+        </ResponsiveContainer>
+      </article>
+
+      <article className="chart-card sources">
+        <h3>Top источники</h3>
+        {(stats.top_sources || []).map((source) => (
+          <div className="source-row" key={source.ip}><code>{source.ip}</code><span>{source.incident_count} incident</span><small>{source.threat_types.join(", ")}</small></div>
+        ))}
+      </article>
     </section>
   );
 }
@@ -279,7 +313,25 @@ function Incidents({ incidents, onOpen, onRefresh }: { incidents: Incident[]; on
   const [status, setStatus] = useState("all");
   const filtered = incidents.filter((item) => (status === "all" || item.status === status) && `${item.id} ${item.agent_name} ${item.threat_type}`.toLowerCase().includes(query.toLowerCase()));
   return (
-    <section className="panel-block"><div className="section-head"><div><p className="eyebrow">INCIDENT QUEUE</p><h2>Инциденты</h2></div><button className="ghost-action" onClick={onRefresh}><RefreshCw size={16} /> Обновить</button></div><div className="filters"><label><Search size={16} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Поиск по agent/threat/id" /></label><select value={status} onChange={(e) => setStatus(e.target.value)}><option value="all">Все статусы</option><option value="new">new</option><option value="investigating">investigating</option><option value="resolved">resolved</option><option value="false_positive">false_positive</option></select></div><div className="incident-table"><div className="incident-row header"><span>Инцидент</span><span>Агент</span><span>Угроза</span><span>Severity</span><span>ML</span><span>Статус</span></div>{filtered.map((item) => <button className="incident-row" key={item.id} onClick={() => onOpen(item)}><code>{item.id.slice(0, 8)}</code><span>{item.agent_name || item.agent_id}</span><span>{item.threat_type}</span><span className={`chip ${severityClass(item.severity)}`}>{item.severity}</span><span>{item.ml_score.toFixed(2)}</span><span className={`chip ${statusClass(item.status)}`}>{item.status}</span></button>)}</div></section>
+    <section className="panel-block">
+      <div className="section-head"><div><p className="eyebrow">INCIDENT QUEUE</p><h2>Инциденты</h2></div><button className="ghost-action" onClick={onRefresh}><RefreshCw size={16} /> Обновить</button></div>
+      <div className="filters">
+        <label><Search size={16} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Поиск по agent/threat/id" /></label>
+        <select value={status} onChange={(e) => setStatus(e.target.value)}>
+          <option value="all">Все статусы</option><option value="new">new</option><option value="investigating">investigating</option><option value="resolved">resolved</option><option value="false_positive">false_positive</option>
+        </select>
+      </div>
+      <div className="incident-table">
+        <div className="incident-row header"><span>Инцидент</span><span>Агент</span><span>Угроза</span><span>Severity</span><span>ML</span><span>Статус</span></div>
+        {filtered.map((item) => (
+          <button className="incident-row" key={item.id} onClick={() => onOpen(item)}>
+            <code>{item.id.slice(0, 8)}</code><span>{item.agent_name || item.agent_id}</span><span>{item.threat_type}</span>
+            <span className={`chip ${severityClass(item.severity)}`}>{item.severity}</span><span>{item.ml_score.toFixed(2)}</span>
+            <span className={`chip ${statusClass(item.status)}`}>{item.status}</span>
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -296,13 +348,28 @@ function Agents({ token, agents, onRefresh }: { token: string; agents: Agent[]; 
       setAgentName("");
       toast.success("Токен агента создан. Скопируйте его сейчас — он показывается один раз.");
       onRefresh();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Не удалось создать токен");
-    } finally {
-      setLoading(false);
-    }
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Не удалось создать токен"); }
+    finally { setLoading(false); }
   }
-  return <section className="panel-block"><div className="section-head"><div><p className="eyebrow">AGENT CONTROL</p><h2>Агенты и выпуск токенов</h2></div><button className="ghost-action" onClick={onRefresh}><RefreshCw size={16} /> Обновить</button></div><form className="agent-form" onSubmit={createAgent}><input value={agentName} onChange={(e) => setAgentName(e.target.value)} placeholder="router-office-1" required /><button className="primary-action" disabled={loading}><Plus size={16} /> Создать токен</button></form>{createdToken && <div className="token-box"><KeyRound size={18} /><code>{createdToken}</code><button onClick={() => navigator.clipboard.writeText(createdToken).then(() => toast.success("Токен скопирован"))}><Copy size={15} /></button></div>}<div className="agent-grid">{agents.map((agent) => <article className="agent-card" key={agent.id}><div><Network /><strong>{agent.name}</strong></div><span className={`chip ${agent.status === "active" ? "text-emerald-100 bg-emerald-500/20 border-emerald-400/30" : "text-slate-200 bg-slate-500/20 border-slate-400/30"}`}>{agent.status}</span><p>token: <code>{agent.token_prefix || "—"}</code></p><p>last seen: {formatDate(agent.last_seen)}</p><p>logs today: {formatNumber(agent.logs_sent_today || 0)}</p><p>last incident: {formatDate(agent.last_incident_at)}</p></article>)}</div></section>;
+  return (
+    <section className="panel-block">
+      <div className="section-head"><div><p className="eyebrow">AGENT CONTROL</p><h2>Агенты и выпуск токенов</h2></div><button className="ghost-action" onClick={onRefresh}><RefreshCw size={16} /> Обновить</button></div>
+      <form className="agent-form" onSubmit={createAgent}><input value={agentName} onChange={(e) => setAgentName(e.target.value)} placeholder="router-office-1" required /><button className="primary-action" disabled={loading}><Plus size={16} /> Создать токен</button></form>
+      {createdToken && <div className="token-box"><KeyRound size={18} /><code>{createdToken}</code><button onClick={() => navigator.clipboard.writeText(createdToken).then(() => toast.success("Токен скопирован"))}><Copy size={15} /></button></div>}
+      <div className="agent-grid">
+        {agents.map((agent) => (
+          <article className="agent-card" key={agent.id}>
+            <div><Network /><strong>{agent.name}</strong></div>
+            <span className={`chip ${agent.status === "active" ? "text-emerald-100 bg-emerald-500/20 border-emerald-400/30" : "text-slate-200 bg-slate-500/20 border-slate-400/30"}`}>{agent.status}</span>
+            <p>token: <code>{agent.token_prefix || "—"}</code></p>
+            <p>last seen: {formatDate(agent.last_seen)}</p>
+            <p>logs today: {formatNumber(agent.logs_sent_today || 0)}</p>
+            <p>last incident: {formatDate(agent.last_incident_at)}</p>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 function IncidentInspector({ incident, token, onClose, onUpdated }: { incident: Incident | null; token: string; onClose: () => void; onUpdated: () => void }) {
@@ -311,7 +378,6 @@ function IncidentInspector({ incident, token, onClose, onUpdated }: { incident: 
   const [rawLogs, setRawLogs] = useState<any[] | null>(null);
   const [logsLoading, setLogsLoading] = useState(false);
 
-  // Загружаем сырые логи из ClickHouse при открытии инцидента
   useEffect(() => {
     if (!incident || !token) return;
     setRawLogs(null);
@@ -324,6 +390,7 @@ function IncidentInspector({ incident, token, onClose, onUpdated }: { incident: 
 
   if (!incident) return null;
   const activeIncident = incident;
+
   async function updateStatus(event: React.FormEvent) {
     event.preventDefault();
     try {
@@ -331,11 +398,36 @@ function IncidentInspector({ incident, token, onClose, onUpdated }: { incident: 
       toast.success("Статус инцидента обновлен");
       onUpdated();
       onClose();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Не удалось обновить статус");
-    }
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Не удалось обновить статус"); }
   }
-  return <aside className="inspector"><div className="inspector-card"><button className="close" onClick={onClose}>×</button><p className="eyebrow">INCIDENT DETAIL</p><h2>{activeIncident.threat_type} <span className={`chip ${severityClass(activeIncident.severity)}`}>S{activeIncident.severity}</span></h2><p className="muted"><code>{activeIncident.id}</code></p><div className="detail-grid"><span>Агент</span><strong>{activeIncident.agent_name || activeIncident.agent_id}</strong><span>Создан</span><strong>{formatDate(activeIncident.created_at)}</strong><span>ML score</span><strong>{activeIncident.ml_score.toFixed(2)}</strong><span>Статус</span><strong className={`chip ${statusClass(activeIncident.status)}`}>{activeIncident.status}</strong></div><h3>Summary</h3><pre>{JSON.stringify(activeIncident.summary || {}, null, 2)}</pre><h3>Details</h3><pre>{JSON.stringify(activeIncident.details || {}, null, 2)}</pre><h3>Сырые логи из ClickHouse</h3>{logsLoading ? <p className="muted">Загрузка сырых логов...</p> : <pre>{JSON.stringify(rawLogs || [], null, 2)}</pre>}<form onSubmit={updateStatus} className="status-form"><select value={status} onChange={(e) => setStatus(e.target.value)}><option value="new">new</option><option value="investigating">investigating</option><option value="resolved">resolved</option><option value="false_positive">false_positive</option></select><textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Комментарий расследования" /><button className="primary-action"><CheckCircle2 size={16} /> Обновить статус</button></form></div></aside>;
+
+  return (
+    <aside className="inspector">
+      <div className="inspector-card">
+        <button className="close" onClick={onClose}>×</button>
+        <p className="eyebrow">INCIDENT DETAIL</p>
+        <h2>{activeIncident.threat_type} <span className={`chip ${severityClass(activeIncident.severity)}`}>S{activeIncident.severity}</span></h2>
+        <p className="muted"><code>{activeIncident.id}</code></p>
+        <div className="detail-grid">
+          <span>Агент</span><strong>{activeIncident.agent_name || activeIncident.agent_id}</strong>
+          <span>Создан</span><strong>{formatDate(activeIncident.created_at)}</strong>
+          <span>ML score</span><strong>{activeIncident.ml_score.toFixed(2)}</strong>
+          <span>Статус</span><strong className={`chip ${statusClass(activeIncident.status)}`}>{activeIncident.status}</strong>
+        </div>
+        <h3>Summary</h3><pre>{JSON.stringify(activeIncident.summary || {}, null, 2)}</pre>
+        <h3>Details</h3><pre>{JSON.stringify(activeIncident.details || {}, null, 2)}</pre>
+        <h3>Сырые логи из ClickHouse</h3>
+        {logsLoading ? <p className="muted">Загрузка...</p> : <pre>{JSON.stringify(rawLogs || [], null, 2)}</pre>}
+        <form onSubmit={updateStatus} className="status-form">
+          <select value={status} onChange={(e) => setStatus(e.target.value)}>
+            <option value="new">new</option><option value="investigating">investigating</option><option value="resolved">resolved</option><option value="false_positive">false_positive</option>
+          </select>
+          <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Комментарий расследования" />
+          <button className="primary-action"><CheckCircle2 size={16} /> Обновить статус</button>
+        </form>
+      </div>
+    </aside>
+  );
 }
 
 export default function Home() {
@@ -355,40 +447,61 @@ export default function Home() {
     const maxRetries = 6;
     const retryDelayMs = 5000;
     let lastError: unknown = null;
-
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
         const [statsData, incidentsData, agentsData] = await Promise.all([
           apiFetch<StatsResponse>(`/api/stats?period=${period}`, token),
-          apiFetch<{ items: Incident[] }>("/api/incidents?page=1&limit=50&sort_by=created_at&order=desc", token),
+          apiFetch<{ items: Incident[] }>(`/api/incidents?page=1&limit=50&sort_by=created_at&order=desc&period=${period}`, token),
           apiFetch<{ items: Agent[] }>("/api/agents", token),
         ]);
         setStats(statsData);
         setIncidents(incidentsData.items || []);
         setAgents(agentsData.items || []);
         setDemoMode(false);
-        return; // Успешно — выходим
+        return;
       } catch (error) {
         lastError = error;
-        // На предпоследней попытке показываем предупреждение
-        if (attempt === maxRetries - 2) {
-          toast.warning("Бэкенд ещё не готов, пробуем подключиться...");
-        }
-        // Ждём перед следующей попыткой (кроме последней)
-        if (attempt < maxRetries - 1) {
-          await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
-        }
+        if (attempt === maxRetries - 2) toast.warning("Бэкенд ещё не готов, пробуем подключиться...");
+        if (attempt < maxRetries - 1) await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
       }
     }
-    // Все попытки исчерпаны — показываем демо
     console.error("All retries exhausted, falling back to demo", lastError);
     setDemoMode(true);
-    toast.warning("Бэкенд недоступен после 6 попыток. Показан демо-срез интерфейса.");
+    toast.warning("Бэкенд недоступен после 6 попыток. Показан демо-срез.");
   }
 
   useEffect(() => { void loadData(); }, [token, period]);
 
+  function navTo(s: "dashboard" | "incidents" | "agents") {
+    setSection(s);
+    setSelectedIncident(null);
+  }
+
   if (!token) return <LoginScreen onLogin={setToken} />;
 
-  return <main className="app-shell" style={{ backgroundImage: `linear-gradient(rgba(5,10,18,.92), rgba(5,10,18,.96)), url(${GRID_IMAGE})` }}><nav className="side-rail"><div className="brand-mark"><ShieldAlert size={22} /><span>NM</span></div><button className={section === "dashboard" ? "active" : ""} onClick={() => setSection("dashboard")}><BarChart3 /> Dashboard</button><button className={section === "incidents" ? "active" : ""} onClick={() => setSection("incidents")}><ShieldAlert /> Инциденты</button><button className={section === "agents" ? "active" : ""} onClick={() => setSection("agents")}><RadioTower /> Агенты</button><button className="logout" onClick={() => { localStorage.removeItem("nm_jwt"); setToken(""); }}><LogOut /> Выход</button></nav><div className="workbench"><header className="topbar"><div><p className="eyebrow">NETWORK TRAFFIC MONITOR</p><h1>{section === "dashboard" ? "Command dashboard" : section === "incidents" ? "Incident response" : "Agent registry"}</h1></div><div className="topbar-actions">{demoMode && <span className="chip text-amber-100 bg-amber-500/20 border-amber-400/30">demo fallback</span>}<span className="critical-chip"><AlertTriangle size={15} /> {criticalCount} critical/open</span><span className="user-pill"><UserRound size={15} /> admin</span></div></header>{section === "dashboard" && <Dashboard stats={stats} period={period} setPeriod={setPeriod} />}{section === "incidents" && <Incidents incidents={incidents} onOpen={setSelectedIncident} onRefresh={loadData} />}{section === "agents" && <Agents token={token} agents={agents} onRefresh={loadData} />}</div><IncidentInspector incident={selectedIncident} token={token} onClose={() => setSelectedIncident(null)} onUpdated={loadData} /></main>;
+  return (
+    <main className="app-shell" style={{ backgroundImage: `linear-gradient(rgba(5,10,18,.92), rgba(5,10,18,.96)), url(${GRID_IMAGE})` }}>
+      <nav className="side-rail">
+        <div className="brand-mark"><ShieldAlert size={22} /><span>NM</span></div>
+        <button className={section === "dashboard" ? "active" : ""} onClick={() => navTo("dashboard")}><BarChart3 /> Dashboard</button>
+        <button className={section === "incidents" ? "active" : ""} onClick={() => navTo("incidents")}><ShieldAlert /> Инциденты</button>
+        <button className={section === "agents" ? "active" : ""} onClick={() => navTo("agents")}><RadioTower /> Агенты</button>
+        <button className="logout" onClick={() => { localStorage.removeItem("nm_jwt"); setToken(""); }}><LogOut /> Выход</button>
+      </nav>
+      <div className="workbench">
+        <header className="topbar">
+          <div><p className="eyebrow">NETWORK TRAFFIC MONITOR</p><h1>{section === "dashboard" ? "Command dashboard" : section === "incidents" ? "Incident response" : "Agent registry"}</h1></div>
+          <div className="topbar-actions">
+            {demoMode && <span className="chip text-amber-100 bg-amber-500/20 border-amber-400/30">demo fallback</span>}
+            <span className="critical-chip"><AlertTriangle size={15} /> {criticalCount} critical/open</span>
+            <span className="user-pill"><UserRound size={15} /> admin</span>
+          </div>
+        </header>
+        {section === "dashboard" && <Dashboard stats={stats} period={period} setPeriod={setPeriod} />}
+        {section === "incidents" && <Incidents incidents={incidents} onOpen={setSelectedIncident} onRefresh={loadData} />}
+        {section === "agents" && <Agents token={token} agents={agents} onRefresh={loadData} />}
+      </div>
+      <IncidentInspector incident={selectedIncident} token={token} onClose={() => setSelectedIncident(null)} onUpdated={loadData} />
+    </main>
+  );
 }
