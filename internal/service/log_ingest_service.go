@@ -160,10 +160,16 @@ func (s *LogIngestService) ProcessBatch(logs []domain.NetworkLog, agentID uuid.U
 		details["top_suspicious_ips"] = stringsJoin(topIPs, ", ")
 	}
 
+	// Повышаем severity для эвристических ddos/port_scan (ML-модель может давать score ~0)
+	effectiveScore := mlScore
+	if (detectionMethod == "heuristic" || detectionMethod == "heuristic_local") && (threatType == "ddos" || threatType == "port_scan") {
+		effectiveScore = 0.85
+	}
+
 	inc := &domain.Incident{
 		AgentID:    agentID,
 		ThreatType: threatType,
-		Severity:   calculateSeverity(mlScore, len(logs)),
+		Severity:   calculateSeverity(effectiveScore, len(logs)),
 		MLScore:    mlScore,
 		Details:    details,
 	}

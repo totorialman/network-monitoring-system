@@ -130,8 +130,6 @@ services:
       - "5001:5000"
     environment:
       MODEL_PATH: /models/anomaly_model.pkl
-    volumes:
-      - ml_models:/models
     healthcheck:
       test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:5000/health').raise_for_status()"]
       interval: 30s
@@ -145,7 +143,6 @@ services:
 volumes:
   postgres_data:
   clickhouse_data:
-  ml_models:
 
 networks:
   nm-network:
