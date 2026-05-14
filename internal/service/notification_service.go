@@ -35,7 +35,21 @@ func (s *NotificationService) SendTelegram(ctx context.Context, incident *domain
 		return nil
 	}
 	msg := fmt.Sprintf("🚨 ОБНАРУЖЕНА АНОМАЛИЯ\n\nТип: %s\nСерьёзность: %d/5\nВремя: %s\nОценка ML: %.2f\n\nПодробности: %s/%s", incident.ThreatType, incident.Severity, incident.CreatedAt.Format(time.RFC3339), incident.MLScore, s.cfg.BaseIncidentURL, incident.ID)
-	payload := map[string]any{"chat_id": s.cfg.AdminChatID, "text": msg, "reply_markup": map[string]any{"inline_keyboard": [][]map[string]string{{{"text": "Расследовать", "callback_data": "investigate:" + incident.ID.String()}, {"text": "Ложное срабатывание", "callback_data": "false_positive:" + incident.ID.String()}}}}}
+	payload := map[string]any{
+		"chat_id": s.cfg.AdminChatID,
+		"text":    msg,
+		"reply_markup": map[string]any{
+			"inline_keyboard": [][]map[string]string{
+				{
+					{"text": "🟡 В работу", "callback_data": "investigating:" + incident.ID.String()},
+					{"text": "🟢 Решено", "callback_data": "resolved:" + incident.ID.String()},
+				},
+				{
+					{"text": "⚪ Ложное срабатывание", "callback_data": "false_positive:" + incident.ID.String()},
+				},
+			},
+		},
+	}
 	body, _ := json.Marshal(payload)
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", s.cfg.BotToken)
 	for attempt := 1; attempt <= s.cfg.RetryCount; attempt++ {

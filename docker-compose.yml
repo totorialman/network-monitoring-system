@@ -56,11 +56,12 @@ services:
       JWT_EXPIRATION: 24h
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_ADMIN_CHAT_ID: ${TELEGRAM_ADMIN_CHAT_ID:-}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
       TELEGRAM_MIN_SEVERITY: ${TELEGRAM_MIN_SEVERITY:-3}
       TELEGRAM_MIN_ML_SCORE: ${TELEGRAM_MIN_ML_SCORE:-0.6}
       INIT_ADMIN_LOGIN: ${INIT_ADMIN_LOGIN:-admin}
       INIT_ADMIN_PASSWORD: ${INIT_ADMIN_PASSWORD}
-      BASE_INCIDENT_URL: ${BASE_INCIDENT_URL:-https://monitor.local/incidents}
+      BASE_INCIDENT_URL: ${BASE_INCIDENT_URL:-https://fluxmon.ru/incidents}
     depends_on:
       postgres:
         condition: service_healthy

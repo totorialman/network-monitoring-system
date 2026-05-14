@@ -63,12 +63,16 @@ func main() {
 	authH := handler.NewAuthHandler(authSvc)
 	agentH := handler.NewAgentHandler(agents, ingest)
 	incH := handler.NewIncidentHandler(incidents, clickhouse)
+	telegramH := handler.NewTelegramHandler(incidents, cfg.Telegram, logger)
 	statsH := handler.NewStatsHandler(incidents, clickhouse)
 	healthH := handler.NewHealthHandler(pg, clickhouse, mlClient, cfg.App.Version)
 
 	r := mux.NewRouter()
 	r.Use(mux.MiddlewareFunc(middleware.Recover(logger)))
 	r.Use(mux.MiddlewareFunc(middleware.Logging(logger)))
+
+	// Регистрация webhook в Telegram Bot API
+	go handler.RegisterWebhook(cfg.Telegram, logger)
 
 	r.HandleFunc("/healthz", healthH.Healthz).Methods(http.MethodGet)
 
@@ -78,6 +82,9 @@ func main() {
 	wsRouter := api.PathPrefix("/ws").Subrouter()
 	wsRouter.Use(mux.MiddlewareFunc(middleware.JWT(cfg.JWT.Secret)))
 	wsRouter.HandleFunc("", wsHub.ServeWs).Methods(http.MethodGet)
+
+	// Публичный эндпоинт для вебхуков Telegram
+	r.HandleFunc("/api/telegram/webhook", telegramH.Webhook).Methods(http.MethodPost)
 
 	api.HandleFunc("/auth/login", authH.Login).Methods(http.MethodPost)
 
