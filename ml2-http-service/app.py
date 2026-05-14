@@ -322,11 +322,10 @@ def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
         if heuristic_ddos or heuristic_portscan:
             if not is_anomaly:
                 is_anomaly = True
-                # Не завышаем anomaly_score — оставляем тот, что дала ML-модель (близкий к 0)
-                # но инцидент всё равно создаётся благодаря флагу is_anomaly
             detection_method = "heuristic"
-            if confidence < 0.85:
-                confidence = 0.85
+            anomaly_score = 0.85
+            if confidence < 0.9:
+                confidence = 0.9
 
     # 3. Классификация угрозы
     threat_type = classify_threat(features, anomaly_score) if is_anomaly else "other"
