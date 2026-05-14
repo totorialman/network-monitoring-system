@@ -11,16 +11,18 @@ import (
 	"network-monitor-backend/internal/middleware"
 	jwtutil "network-monitor-backend/internal/pkg/jwt"
 	"network-monitor-backend/internal/repository/postgres"
+	"network-monitor-backend/internal/ws"
 	"strconv"
 )
 
 type IncidentHandler struct {
 	incidents *postgres.IncidentRepo
 	logs      LogQuerier
+	hub       *ws.Hub
 }
 
-func NewIncidentHandler(incidents *postgres.IncidentRepo, logs LogQuerier) *IncidentHandler {
-	return &IncidentHandler{incidents: incidents, logs: logs}
+func NewIncidentHandler(incidents *postgres.IncidentRepo, logs LogQuerier, hub *ws.Hub) *IncidentHandler {
+	return &IncidentHandler{incidents: incidents, logs: logs, hub: hub}
 }
 func (h *IncidentHandler) List(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
@@ -83,6 +85,15 @@ func (h *IncidentHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 	if err := h.incidents.UpdateStatus(r.Context(), id, userID, req.Status); err != nil {
 		httpx.Error(w, 500, "STATUS_UPDATE_FAILED", err.Error(), nil)
 		return
+	}
+	if h.hub != nil {
+		h.hub.Broadcast(ws.Message{
+			Type: "incident_update",
+			Payload: map[string]any{
+				"id":     id,
+				"status": req.Status,
+			},
+		})
 	}
 	httpx.JSON(w, 200, map[string]any{"id": id, "status": req.Status, "updated_by": login})
 }

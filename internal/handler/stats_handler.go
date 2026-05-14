@@ -12,7 +12,7 @@ import (
 // LogQuerier расширенный интерфейс для ClickHouse-лог-репозитория:
 // Count — для дашборда, RawSample — для «разворачивания» сырых логов инцидента.
 type LogQuerier interface {
-	Count(context.Context) int64
+	Count(ctx context.Context, period string) (int64, error)
 	RawSample(ctx context.Context, agentID string, limit int) []map[string]any
 }
 
@@ -43,11 +43,15 @@ func (h *StatsHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	// Получаем top_sources из БД
 	topSources := h.incidents.TopSources(ctx, period)
 
+	logCount, logErr := h.logs.Count(ctx, period)
+	if logErr != nil {
+		logCount = 0
+	}
 	overview := map[string]any{
 		"total_incidents":      st["total_incidents"],
 		"new_incidents":        st["new_incidents"],
 		"active_agents":         st["active_agents"],
-		"total_logs_processed":  h.logs.Count(ctx),
+		"total_logs_processed":  logCount,
 		"avg_ml_score":         st["avg_ml_score"],
 	}
 	httpx.JSON(w, 200, map[string]any{

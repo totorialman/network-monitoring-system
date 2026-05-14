@@ -5,6 +5,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 	"network-monitor-backend/internal/domain"
+	"network-monitor-backend/internal/ws"
 	"time"
 )
 
@@ -22,12 +23,13 @@ type LogIngestService struct {
 	incidents     IncidentRepository
 	ml            MLClient
 	notifications Notification
+	hub           *ws.Hub
 	logger        *zap.Logger
 	window        float64
 }
 
-func NewLogIngestService(logs LogRepository, incidents IncidentRepository, ml MLClient, notifications Notification, logger *zap.Logger, window float64) *LogIngestService {
-	return &LogIngestService{logs: logs, incidents: incidents, ml: ml, notifications: notifications, logger: logger, window: window}
+func NewLogIngestService(logs LogRepository, incidents IncidentRepository, ml MLClient, notifications Notification, hub *ws.Hub, logger *zap.Logger, window float64) *LogIngestService {
+	return &LogIngestService{logs: logs, incidents: incidents, ml: ml, notifications: notifications, hub: hub, logger: logger, window: window}
 }
 
 // convertToRawLogs конвертирует domain.NetworkLog в domain.RawLogForML для отправки в ml2-http-service.
@@ -90,34 +92,59 @@ func (s *LogIngestService) ProcessBatch(logs []domain.NetworkLog, agentID uuid.U
 		anomalyResult = res
 	}
 
-	// 3. Если аномалия — создаём инцидент
-	if anomalyResult != nil && anomalyResult.IsAnomaly {
-		details := map[string]any{
-			"anomaly_score":    anomalyResult.AnomalyScore,
-			"confidence":       anomalyResult.Confidence,
-			"threat_type":      anomalyResult.ThreatType,
-			"detection_method": anomalyResult.DetectionMethod,
-			"log_count":        len(logs),
+	// 3. Создаём инцидент для каждого батча (все логи считаются инцидентами)
+	threatType := "traffic_log"
+	anomalyScore := 0.0
+	confidence := 0.0
+	detectionMethod := "none"
+	if anomalyResult != nil {
+		anomalyScore = anomalyResult.AnomalyScore
+		confidence = anomalyResult.Confidence
+		detectionMethod = anomalyResult.DetectionMethod
+		if anomalyResult.IsAnomaly && anomalyResult.ThreatType != "" {
+			threatType = anomalyResult.ThreatType
 		}
-		if len(anomalyResult.Recommendations) > 0 {
-			details["recommendations"] = anomalyResult.Recommendations
-		}
-		if len(topIPs) > 0 {
-			details["top_suspicious_ips"] = stringsJoin(topIPs, ", ")
-		}
-		inc := &domain.Incident{
-			AgentID:    agentID,
-			ThreatType: anomalyResult.ThreatType,
-			Severity:   calculateSeverity(anomalyResult.AnomalyScore, len(logs)),
-			MLScore:    anomalyResult.AnomalyScore,
-			Details:    details,
-		}
-		if err := s.incidents.Create(ctx, inc); err != nil {
-			s.logger.Error("failed to create incident", zap.Error(err))
-			return
-		}
-		go s.notifications.SendTelegram(ctx, inc)
 	}
+
+	details := map[string]any{
+		"anomaly_score":    anomalyScore,
+		"confidence":       confidence,
+		"threat_type":      threatType,
+		"detection_method": detectionMethod,
+		"log_count":        len(logs),
+	}
+	if anomalyResult != nil && len(anomalyResult.Recommendations) > 0 {
+		details["recommendations"] = anomalyResult.Recommendations
+	}
+	if len(topIPs) > 0 {
+		details["top_suspicious_ips"] = stringsJoin(topIPs, ", ")
+	}
+	inc := &domain.Incident{
+		AgentID:    agentID,
+		ThreatType: threatType,
+		Severity:   calculateSeverity(anomalyScore, len(logs)),
+		MLScore:    anomalyScore,
+		Details:    details,
+	}
+	if err := s.incidents.Create(ctx, inc); err != nil {
+		s.logger.Error("failed to create incident", zap.Error(err))
+		return
+	}
+	if s.hub != nil {
+		s.hub.Broadcast(ws.Message{
+			Type: "incident_new",
+			Payload: map[string]any{
+				"id":          inc.ID,
+				"agent_id":    inc.AgentID,
+				"threat_type": inc.ThreatType,
+				"severity":    inc.Severity,
+			},
+		})
+		s.hub.Broadcast(ws.Message{
+			Type: "stats_update",
+		})
+	}
+	go s.notifications.SendTelegram(ctx, inc)
 }
 
 // extractTopSuspiciousIPs извлекает топ-N самых частых src_ip из логов.

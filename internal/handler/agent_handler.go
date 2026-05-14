@@ -1,8 +1,7 @@
 package handler
 
 import (
-	"archive/zip"
-	"bytes"
+	"bufio"
 	"encoding/json"
 	"github.com/google/uuid"
 	"io"
@@ -62,87 +61,39 @@ func (h *AgentHandler) UploadLogs(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, 400, "INVALID_PAYLOAD", "multipart form is invalid", nil)
 		return
 	}
-	file, _, err := r.FormFile("archive")
+	file, _, err := r.FormFile("file")
 	if err != nil {
-		httpx.Error(w, 400, "INVALID_PAYLOAD", "archive field is required", nil)
+		httpx.Error(w, 400, "INVALID_PAYLOAD", "file field is required (send a .jsonl file)", nil)
 		return
 	}
 	defer file.Close()
-	data, err := io.ReadAll(io.LimitReader(file, 55<<20))
-	if err != nil {
-		httpx.Error(w, 400, "INVALID_PAYLOAD", "cannot read archive", nil)
-		return
-	}
-	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
-	if err != nil {
-		httpx.Error(w, 400, "INVALID_PAYLOAD", "ZIP archive is corrupted", nil)
-		return
-	}
-
-	// Проверяем, что в архиве есть хотя бы один .json файл
-	hasJSON := false
-	for _, f := range zr.File {
-		if !f.FileInfo().IsDir() && strings.HasSuffix(strings.ToLower(f.Name), ".json") {
-			hasJSON = true
-			break
-		}
-	}
-	if !hasJSON {
-		httpx.Error(w, 400, "INVALID_PAYLOAD", "ZIP archive must contain at least one .json file", nil)
-		return
-	}
 
 	var valid []domain.NetworkLog
 	var invalid []domain.ValidationError
 	idx := 0
 
-	// Обрабатываем все .json файлы в архиве
-	for _, f := range zr.File {
-		if f.FileInfo().IsDir() {
+	scanner := bufio.NewScanner(io.LimitReader(file, 55<<20))
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024) // строки до 1MB
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
 			continue
 		}
-		if !strings.HasSuffix(strings.ToLower(f.Name), ".json") {
-			continue
-		}
-
-		rc, err := f.Open()
+		log, err := domain.ParseNetworkLog([]byte(line), ag.ID)
 		if err != nil {
-			continue
-		}
-
-		raw, err := io.ReadAll(rc)
-		rc.Close()
-		if err != nil {
-			continue
-		}
-
-		// Пробуем распарсить как JSON-массив
-		var fileLogs []json.RawMessage
-		if err := json.Unmarshal(raw, &fileLogs); err != nil {
-			// Если не массив — пробуем как одиночный объект
-			var single json.RawMessage
-			if err2 := json.Unmarshal(raw, &single); err2 != nil {
-				invalid = append(invalid, domain.ValidationError{Index: idx, Reason: "json_parse_error"})
-				idx++
-				continue
-			}
-			fileLogs = []json.RawMessage{single}
-		}
-
-		for _, rawMsg := range fileLogs {
-			log, err := domain.ParseNetworkLog(rawMsg, ag.ID)
-			if err != nil {
-				invalid = append(invalid, domain.ValidationError{Index: idx, Reason: err.Error()})
-				idx++
-				continue
-			}
-			valid = append(valid, log)
+			invalid = append(invalid, domain.ValidationError{Index: idx, Reason: err.Error()})
 			idx++
+			continue
 		}
+		valid = append(valid, log)
+		idx++
 	}
 
-	if len(valid) > 0 {
-		go h.ingest.ProcessBatch(valid, ag.ID)
+	if len(valid) == 0 {
+		httpx.Error(w, 400, "INVALID_PAYLOAD", "JSONL file contains no valid log entries", nil)
+		return
 	}
+
+	go h.ingest.ProcessBatch(valid, ag.ID)
 	httpx.JSON(w, http.StatusAccepted, map[string]any{"batch_id": uuid.New(), "records_received": len(valid) + len(invalid), "records_valid": len(valid), "records_invalid": len(invalid), "processing_status": "queued"})
 }

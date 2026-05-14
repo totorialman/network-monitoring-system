@@ -1,203 +1,284 @@
-# Network Traffic Monitoring System
+# Network Monitoring System
 
-**Версия проекта:** 2.0.0 (ml2)
+Система мониторинга сетевых аномалий в реальном времени. Принимает сетевые логи от агентов, анализирует их через ML-модель (Isolation Forest), создаёт инциденты и транслирует обновления через WebSocket.
 
-## Назначение проекта
+## Архитектура
 
-Проект реализует систему мониторинга сетевого трафика по ТЗ. В состав входят **React frontend для администратора**, **Go backend**, **PostgreSQL**, **ClickHouse** и отдельный **Python ML2-сервис**. 
-
-Система принимает ZIP-архивы с сетевыми событиями от агентов, валидирует и сохраняет сырые логи в ClickHouse, передаёт их в ML2-сервис (который сам агрегирует признаки и запускает Isolation Forest), создаёт инциденты в PostgreSQL и отображает результаты в web-панели с авторизацией, графиками, карточками инцидентов и управлением агентами.
-
-> **Ключевая идея архитектуры:** PostgreSQL — транзакционные сущности (пользователи, агенты, инциденты, алерты, аудит). ClickHouse — высокообъёмные события сетевого трафика. ML2-сервис — отдельный Python/FastAPI контейнер, который принимает **сырые логи**, сам агрегирует их в 18 признаков (как в ml2/TimeWindowAggregator) и запускает Isolation Forest. Классификация угроз (port_scan, ddos, anomaly) выполняется также в ML2-сервисе. Frontend обслуживается через Nginx и проксирует `/api` в backend внутри общей Docker-сети (same-origin, без CORS).
-
-## Состав репозитория
-
-| Путь | Назначение |
-|---|---|
-| `frontend` | React/Vite frontend: авторизация, dashboard, инциденты, агенты. |
-| `cmd/server` | Точка входа Go backend и Dockerfile. |
-| `internal/config` | Загрузка конфигурации из ENV. |
-| `internal/domain` | Доменные структуры: пользователи, агенты, логи, запросы. |
-| `internal/handler` | HTTP-обработчики REST API. |
-| `internal/middleware` | JWT-аутентификация, авторизация агента, логирование, recovery. |
-| `internal/repository/postgres` | PostgreSQL-репозитории и embedded SQL миграции. |
-| `internal/repository/clickhouse` | ClickHouse-репозиторий для хранения сетевых логов. |
-| `internal/service` | Auth, log ingestion, ML-client, Telegram notifications. |
-| `ml2-http-service` | Python FastAPI ML2-сервис (Isolation Forest, 18 признаков, классификация угроз). |
-| `ml2` | Автономный ML-агент для обучения модели на pcap-файлах или захвата с интерфейса. |
-| `clickhouse/config.xml` | Конфигурация ClickHouse. |
-| `docker-compose.yml` | Общий Compose-файл для всех сервисов. |
-
-## Технологический стек
-
-| Компонент | Технология | Роль |
-|---|---|---|
-| Frontend | React 19, Vite, TypeScript, Recharts | Web-панель администратора. |
-| Frontend runtime | Nginx 1.27 Alpine | Отдача SPA + proxy `/api` к backend. |
-| Backend | Go 1.21, Gorilla Mux, pgx, goose | REST API, авторизация, валидация, ingestion. |
-| OLTP-хранилище | PostgreSQL 15 | Пользователи, агенты, инциденты, алерты, аудит. |
-| Event-хранилище | ClickHouse 23.3 | Хранение и аналитика сетевых логов. |
-| ML2-сервис | Python 3.11, FastAPI, scikit-learn | Детекция аномалий (Isolation Forest) + классификация угроз. |
-| Автономный ML2 | Python 3.7+, scapy, scikit-learn | Обучение модели на pcap-файлах или захват с интерфейса. |
-| Оркестрация | Docker Compose | Запуск всех сервисов одной командой. |
-
-## Быстрый запуск через Docker Compose
-
-```bash
-# 1. Создать .env из шаблона
-cp .env.example .env
-
-# 2. Отредактировать .env — обязательно сменить:
-#    DB_PASSWORD, CLICKHOUSE_PASSWORD, JWT_SECRET, INIT_ADMIN_PASSWORD
-
-# 3. Запустить все сервисы
-docker compose up --build -d
-
-# 4. Открыть в браузере
-open http://localhost:3000
+```
+┌──────────┐    JSONL (HTTP POST)    ┌──────────────┐
+│  Agents   │ ──────────────────────> │   Backend    │
+│ (агенты)  │                         │  (Go, :8080) │
+└──────────┘                         └──────┬───────┘
+                                           │
+                    ┌──────────────────────┼──────────────────────┐
+                    │                      │                      │
+              ┌─────▼─────┐         ┌──────▼──────┐       ┌──────▼──────┐
+              │ PostgreSQL │         │  ClickHouse │       │ ML Service  │
+              │ (инциденты,│         │ (сырые логи)│       │ (Python,    │
+              │  агенты,   │         │             │       │  :5000)     │
+              │  пользова- │         └──────────────┘       └─────────────┘
+              │  тели)     │
+              └────────────┘
+                                           │
+                                    ┌──────▼──────┐
+                                    │   Frontend  │
+                                    │ (Nginx+React│
+                                    │   :3000)    │
+                                    │  ┌───────┐  │
+                                    │  │ WebSocket│ │
+                                    │  └───────┘  │
+                                    └─────────────┘
 ```
 
-| Поле | Значение по умолчанию |
-|---|---|
-| Логин | admin (из `INIT_ADMIN_LOGIN`) |
-| Пароль | из `INIT_ADMIN_PASSWORD` в `.env` |
-| Frontend | `http://localhost:3000` |
-| Backend API | `http://localhost:8080` (через Nginx same-origin `/api`) |
+- **Backend** (Go) — REST API + WebSocket Hub
+- **Frontend** (React/Vite) — дашборд с графиками, списком инцидентов и управлением агентами
+- **PostgreSQL** — пользователи, агенты, инциденты, алерты
+- **ClickHouse** — сырые сетевые логи (TTL 90 дней, автоматическое удаление)
+- **ML Service** (Python/FastAPI) — Isolation Forest + эвристики
 
-Проверить состояние:
+## Системные требования
 
-```bash
-curl http://localhost:8080/healthz
-```
+- Docker Engine 24+ и Docker Compose v2
+- Сервер с **2+ ядрами CPU** и **4+ ГБ RAM**
+- Публичный домен (для HTTPS через Certbot + Let's Encrypt)
+- Открытые порты: **80** и **443** (для Certbot), **3000** (фронтенд, только локально)
 
-## Порты сервисов
+## Быстрый старт
 
-| Сервис | Контейнер | Порт хоста | Назначение |
-|---|---|---|---:|
-| Frontend | `nm-frontend` | `3000` | Web-панель администратора. |
-| Backend | `nm-backend` | `8080` | REST API и healthcheck. |
-| PostgreSQL | `nm-postgres` | `5432` | Транзакционное хранилище. |
-| ClickHouse HTTP | `nm-clickhouse` | `8123` | HTTP-интерфейс ClickHouse. |
-| ClickHouse native | `nm-clickhouse` | `9000` | Native-интерфейс ClickHouse. |
-| ML2-сервис | `nm-ml2-http` | `5001` | FastAPI ML2 endpoint. |
-
-## REST API
-
-### Авторизация администратора
+### 1. Клонирование
 
 ```bash
-curl -X POST http://localhost:8080/api/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"login":"admin","password":"ChangeMe123!"}'
+git clone https://github.com/totorialman/network-monitoring-system.git
+cd network-monitoring-system
+git checkout feature/jsonl-websocket-russian-fixes
 ```
 
-### Создание токена агента
+### 2. Настройка окружения
+
+Создайте файл `.env` в корне проекта:
+
+```env
+# Пароли для БД (обязательно замените на свои!)
+DB_PASSWORD=StrongPostgresPassword123!
+CLICKHOUSE_PASSWORD=StrongClickHousePassword123!
+
+# JWT секрет (минимум 32 символа, сгенерируйте через: openssl rand -hex 32)
+JWT_SECRET=your-secret-at-least-32-characters-long-hex-string
+
+# Пароль администратора по умолчанию (смените после первого входа)
+INIT_ADMIN_PASSWORD=ChangeMe123!
+
+# Telegram-уведомления (опционально)
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_ADMIN_CHAT_ID=
+TELEGRAM_MIN_SEVERITY=3
+TELEGRAM_MIN_ML_SCORE=0.6
+
+# URL для ссылок в Telegram-уведомлениях
+BASE_INCIDENT_URL=https://monitor.example.com/incidents
+
+# ML-сервис
+ML_SERVICE_URL=http://ml2-http-service:5000
+ML_TIMEOUT=30s
+ML_WINDOW_SECONDS=300
+```
+
+### 3. Запуск
 
 ```bash
-ADMIN_TOKEN='<jwt_from_login>'
-curl -X POST http://localhost:8080/api/admin/agents/tokens \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-  -H 'Content-Type: application/json' \
-  -d '{"agent_name":"office-gateway-1"}'
+docker compose up -d
 ```
 
-### Загрузка логов агентом
+Проверьте статус всех контейнеров:
 
 ```bash
-AGENT_TOKEN='<agent_token>'
-curl -X POST http://localhost:8080/api/agent/logs \
-  -H "Authorization: Bearer ${AGENT_TOKEN}" \
-  -F 'archive=@traffic.zip'
+docker compose ps
 ```
 
-Минимальный элемент `traffic.json`:
+Должны быть запущены 5 контейнеров: `nm-frontend`, `nm-backend`, `nm-postgres`, `nm-clickhouse`, `nm-ml2-http`.
 
-```json
-{
-  "timestamp": 1713623722.45,
-  "src_ip": "192.168.1.10",
-  "dst_ip": "10.0.0.5",
-  "src_port": 54321,
-  "dst_port": 80,
-  "proto": 6,
-  "ttl": 64,
-  "tcp_flags": "SYN",
-  "length": 64
+### 4. Доступ к панели управления
+
+Откройте браузер на `http://<IP-сервера>:3000` и войдите:
+
+- **Логин:** `admin`
+- **Пароль:** тот, что указан в `INIT_ADMIN_PASSWORD`
+
+> ⚠️ **Сразу после входа смените пароль администратора** через создание второго админа в БД или замену хеша пароля.
+
+## Настройка HTTPS с Certbot + Let's Encrypt
+
+### Шаг 1: Установите Nginx на хост-машине
+
+```bash
+sudo apt update && sudo apt install -y nginx certbot python3-certbot-nginx
+```
+
+### Шаг 2: Создайте конфигурацию Nginx
+
+`/etc/nginx/sites-available/monitor`:
+
+```nginx
+server {
+    listen 80;
+    server_name monitor.example.com;  # замените на ваш домен
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 86400s;
+    }
 }
 ```
 
-### Инциденты
+```bash
+sudo ln -s /etc/nginx/sites-available/monitor /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+### Шаг 3: Получите SSL-сертификат
 
 ```bash
-curl "http://localhost:8080/api/incidents?page=1&limit=20&status=new" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}"
-
-# Смена статуса
-curl -X PUT "http://localhost:8080/api/incidents/${INCIDENT_ID}/status" \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-  -H 'Content-Type: application/json' \
-  -d '{"status":"investigating","comment":"Взято в работу"}'
+sudo certbot --nginx -d monitor.example.com
 ```
 
-### Статистика
+Выберите вариант `2` (redirect HTTP → HTTPS) при запросе.
+
+Сертификат будет автоматически обновляться через systemd-таймер.
+
+## Отправка логов от агентов
+
+### 1. Создайте токен агента через панель управления
+
+Администратор → раздел «Агенты» → «Создать токен»
+
+### 2. Отправка JSONL-файла
 
 ```bash
-curl http://localhost:8080/api/stats \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}"
+curl -X POST https://monitor.example.com/api/agent/logs \
+  -H "Authorization: Bearer <agent-token>" \
+  -F "file=@logs.jsonl"
 ```
 
-## Архитектура передачи данных
+### 3. Формат JSONL (одна строка = один лог)
 
-```
-Агент (OpenWRT/RPi)
-  └─► ZIP/traffic.json
-         └─► POST /api/agent/logs (Go backend)
-                ├─► ClickHouse (сохранение сырых логов)
-                └─► POST /analyze → ml2-http-service
-                       │ 1. Агрегация → 18 признаков (TimeWindowAggregator)
-                       │ 2. Isolation Forest (модель /models/anomaly_model.pkl)
-                       │ 3. Классификация: port_scan | ddos | anomaly
-                       └─► { is_anomaly, anomaly_score, confidence, threat_type, recommendations }
-                └─► Создание incident в PostgreSQL
-                └─► Отправка Telegram (опционально)
+```jsonl
+{"timestamp": 1747221400.123, "src_ip": "192.168.1.100", "dst_ip": "10.0.0.5", "src_port": 54321, "dst_port": 443, "proto": 6, "ttl": 64, "length": 1500, "tcp_flags": "SYN", "src_mac": "aa:bb:cc:dd:ee:ff", "dst_mac": "11:22:33:44:55:66", "eth_type": "IPv4"}
+{"timestamp": 1747221400.456, "src_ip": "192.168.1.101", "dst_ip": "10.0.0.6", "src_port": 12345, "dst_port": 80, "proto": 6, "ttl": 128, "length": 512, "tcp_flags": "ACK", "src_mac": "aa:bb:cc:dd:ee:01", "dst_mac": "11:22:33:44:55:01", "eth_type": "IPv4"}
 ```
 
-## ML2-сервис
+| Поле | Тип | Обязательно | Описание |
+|------|------|---------|----------|
+| `timestamp` | float64 | да | Unix timestamp с миллисекундами |
+| `src_ip` | string | да | IP-адрес источника |
+| `dst_ip` | string | да | IP-адрес назначения |
+| `src_port` | uint16 | нет | Порт источника |
+| `dst_port` | uint16 | нет | Порт назначения |
+| `proto` | uint8 | нет | IP-протокол (6=TCP, 17=UDP, 1=ICMP) |
+| `ttl` | uint8 | нет | Time-to-live |
+| `length` | uint16 | нет | Длина пакета |
+| `tcp_flags` | string | нет | TCP-флаги |
+| `src_mac` | string | нет | MAC источника |
+| `dst_mac` | string | нет | MAC назначения |
+| `icmp_type` | uint8 | нет | ICMP type |
+| `icmp_code` | uint8 | нет | ICMP code |
+| `vlan` | uint16 | нет | VLAN ID |
+| `eth_type` | string | нет | EtherType |
 
-ML2-сервис (ml2-http-service) загружает предобученную модель Isolation Forest из `/models/anomaly_model.pkl`. При первом запуске, если модели нет, сервис работает, но ML-анализ недоступен (используются эвристики).
+Ограничения:
+- Размер файла: до 50 МБ
+- Длина одной строки: до 1 МБ
+- Минимум одна валидная запись в файле
 
-| Endpoint | Метод | Назначение |
-|---|---|---|
-| `/health` | GET | Проверка готовности и загрузки модели. |
-| `/analyze` | POST | Принимает `{ agent_id, window_seconds, logs: [...] }`. Возвращает `{ is_anomaly, anomaly_score, confidence, threat_type, recommendations }`. |
+## Переменные окружения (полный список)
 
-### Обучение модели
+| Переменная | По умолчанию | Описание |
+|------------|-------------|----------|
+| `APP_ENV` | `development` | Окружение: `development` или `production` |
+| `APP_PORT` | `8080` | Порт бэкенда |
+| `APP_VERSION` | `1.0.0` | Версия приложения |
+| `DB_POSTGRES_HOST` | `localhost` | Хост PostgreSQL |
+| `DB_POSTGRES_PORT` | `5432` | Порт PostgreSQL |
+| `DB_POSTGRES_USER` | `nm_user` | Пользователь PostgreSQL |
+| `DB_POSTGRES_PASSWORD` | — | Пароль PostgreSQL (из `DB_PASSWORD`) |
+| `DB_POSTGRES_DB` | `network_monitor` | База данных PostgreSQL |
+| `DB_CLICKHOUSE_HOST` | `localhost` | Хост ClickHouse |
+| `DB_CLICKHOUSE_PORT` | `9000` | Нативный порт ClickHouse |
+| `DB_CLICKHOUSE_USER` | `default` | Пользователь ClickHouse |
+| `DB_CLICKHOUSE_PASSWORD` | — | Пароль ClickHouse (из `CLICKHOUSE_PASSWORD`) |
+| `DB_CLICKHOUSE_DB` | `default` | База данных ClickHouse |
+| `ML_SERVICE_URL` | `http://localhost:5000` | URL ML-сервиса |
+| `ML_TIMEOUT` | `30s` | Таймаут запроса к ML |
+| `ML_WINDOW_SECONDS` | `300` | Размер окна агрегации (сек) |
+| `JWT_SECRET` | `change-me-...` | Секрет для JWT (минимум 32 символа) |
+| `JWT_EXPIRATION` | `24h` | Время жизни JWT |
+| `TELEGRAM_BOT_TOKEN` | — | Токен Telegram-бота |
+| `TELEGRAM_ADMIN_CHAT_ID` | — | ID чата для уведомлений |
+| `TELEGRAM_MIN_SEVERITY` | `3` | Минимальная критичность для уведомления |
+| `TELEGRAM_MIN_ML_SCORE` | `0.6` | Минимальный ML-скор для уведомления |
+| `BASE_INCIDENT_URL` | `https://monitor.local/incidents` | Базовый URL инцидентов |
+| `INIT_ADMIN_LOGIN` | `admin` | Логин начального администратора |
+| `INIT_ADMIN_PASSWORD` | `ChangeMe123!` | Пароль начального администратора |
 
-Вы можете обучить модель на реальном трафике через `ml2/`:
+## Обслуживание
+
+### Резервное копирование
 
 ```bash
-# Обучение из pcap-файла
-cd ml2
-pip install -r requirements.txt
-python main.py --mode train --pcap /path/to/dump.pcap --model /models/anomaly_model.pkl
+# PostgreSQL
+docker exec nm-postgres pg_dump -U nm_user network_monitor > backup_$(date +%Y%m%d).sql
+
+# ClickHouse (опционально — сырые логи обычно не бэкапят)
+docker exec nm-clickhouse clickhouse-client --password "$CLICKHOUSE_PASSWORD" --query "BACKUP DATABASE default TO Disk('backups', 'backup_$(date +%Y%m%d)')"
 ```
 
-Затем скопировать `.pkl` в volume `/models` — ml2-http-service подхватит её автоматически.
-
-## Миграции и схема данных
-
-Миграции PostgreSQL встроены в бинарный файл backend через `embed.FS` и применяются при старте. ClickHouse-схема создаётся через `CREATE TABLE IF NOT EXISTS`.
-
-| Хранилище | Таблицы |
-|---|---|
-| PostgreSQL | `users`, `agents`, `incidents`, `alerts`, `audit_log` |
-| ClickHouse | `network_logs` (с материализованным представлением `network_logs_hourly`) |
-
-## Остановка и очистка
+### Просмотр логов
 
 ```bash
-# Остановка
-docker compose down
+docker compose logs -f backend    # логи бэкенда
+docker compose logs -f frontend   # логи nginx
+docker compose logs -f ml2-http-service  # логи ML-сервиса
+```
 
-# Остановка + удаление данных
-docker compose down -v
+### Обновление
+
+```bash
+git pull origin feature/jsonl-websocket-russian-fixes
+docker compose up -d --build
+```
+
+### Очистка старых данных ClickHouse
+
+TTL на 90 дней настроен автоматически. Для ручной очистки:
+
+```bash
+docker exec nm-clickhouse clickhouse-client --password "$CLICKHOUSE_PASSWORD" --query "ALTER TABLE network_logs DELETE WHERE timestamp < now() - INTERVAL 30 DAY"
+```
+
+## Устранение неполадок
+
+1. **Фронтенд не грузится (502/504)**: проверьте `docker compose ps` — все ли контейнеры healthy.
+2. **Ошибка подключения к БД**: проверьте пароли в `.env`, дождитесь healthcheck (до 60 сек).
+3. **ML-сервис недоступен**: логируются в `stdout`, проверьте `docker compose logs ml2-http-service`.
+4. **WebSocket не подключается**: проверьте nginx upstream на порту 3000 — должен быть `proxy_http_version 1.1` и `Upgrade`/`Connection` заголовки.
+
+## Разработка
+
+Требования: Go 1.21+, Node.js 22+, pnpm.
+
+```bash
+# Бэкенд
+go run ./cmd/server
+
+# Фронтенд
+cd frontend && pnpm install && pnpm run dev
+```
+
+Бэкенд ожидает PostgreSQL и ClickHouse на `localhost:5432` и `localhost:9000` соответственно.

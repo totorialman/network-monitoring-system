@@ -4,8 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"sync/atomic"
-	"time"
 
 	_ "github.com/ClickHouse/clickhouse-go/v2"
 	"network-monitor-backend/internal/config"
@@ -13,9 +11,7 @@ import (
 )
 
 type LogRepo struct {
-	db              *sql.DB
-	lastKnownCount  atomic.Int64
-	lastKnownOKTime atomic.Value // time.Time
+	db *sql.DB
 }
 
 func New(cfg config.ClickHouseConfig) (*LogRepo, error) {
@@ -24,9 +20,7 @@ func New(cfg config.ClickHouseConfig) (*LogRepo, error) {
 	if err != nil {
 		return nil, err
 	}
-	repo := &LogRepo{db: db}
-	repo.lastKnownOKTime.Store(time.Time{})
-	return repo, nil
+	return &LogRepo{db: db}, nil
 }
 func (r *LogRepo) Close() error                   { return r.db.Close() }
 func (r *LogRepo) Ping(ctx context.Context) error { return r.db.PingContext(ctx) }
@@ -101,27 +95,21 @@ func (r *LogRepo) BatchInsert(ctx context.Context, logs []domain.NetworkLog) err
 	}
 	return tx.Commit()
 }
+
 // Count возвращает количество сырых логов в ClickHouse.
-// При недоступности ClickHouse возвращает последнее успешно полученное значение (fallback-кэш).
-func (r *LogRepo) Count(ctx context.Context) int64 {
+// Если period задан (1h, 6h, 24h, 7d, 30d) — возвращает количество за указанный период.
+// При ошибке ClickHouse возвращает 0 и ошибку (без fallback-кэша).
+func (r *LogRepo) Count(ctx context.Context, period string) (int64, error) {
 	var n int64
-
-	err := r.db.QueryRowContext(ctx, `SELECT count() FROM network_logs`).Scan(&n)
+	query := `SELECT count() FROM network_logs`
+	if period != "" {
+		query += fmt.Sprintf(" WHERE timestamp > now() - INTERVAL '%s'", periodToInterval(period))
+	}
+	err := r.db.QueryRowContext(ctx, query).Scan(&n)
 	if err != nil {
-		fmt.Printf("ERROR: clickhouse count query failed: %v (fallback=%d)\n", err, r.lastKnownCount.Load())
-		// Если ClickHouse недоступен, возвращаем последнее известное значение
-		if cached := r.lastKnownCount.Load(); cached > 0 {
-			return cached
-		}
-		return 0
+		return 0, err
 	}
-
-	// Обновляем кэш при успешном запросе (но не чаще чем раз в 30 секунд)
-	if prev := r.lastKnownOKTime.Load().(time.Time); time.Since(prev) > 30*time.Second {
-		r.lastKnownCount.Store(n)
-		r.lastKnownOKTime.Store(time.Now())
-	}
-	return n
+	return n, nil
 }
 
 // RawSample возвращает сырые логи из ClickHouse для указанного агента.
@@ -205,4 +193,22 @@ func (r *LogRepo) RawSample(ctx context.Context, agentID string, limit int) []ma
 		out = []map[string]any{}
 	}
 	return out
+}
+
+// periodToInterval конвертирует период в SQL INTERVAL для ClickHouse.
+func periodToInterval(period string) string {
+	switch period {
+	case "1h":
+		return "1 HOUR"
+	case "6h":
+		return "6 HOUR"
+	case "24h":
+		return "24 HOUR"
+	case "7d":
+		return "7 DAY"
+	case "30d":
+		return "30 DAY"
+	default:
+		return "24 HOUR"
+	}
 }

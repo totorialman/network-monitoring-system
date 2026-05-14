@@ -14,6 +14,7 @@ import (
 	chrepo "network-monitor-backend/internal/repository/clickhouse"
 	pgrepo "network-monitor-backend/internal/repository/postgres"
 	"network-monitor-backend/internal/service"
+	"network-monitor-backend/internal/ws"
 	"os"
 	"os/signal"
 	"syscall"
@@ -51,14 +52,16 @@ func main() {
 	if err := authSvc.EnsureInitialAdmin(context.Background(), cfg.InitialAdmin.Login, cfg.InitialAdmin.Password); err != nil {
 		logger.Fatal("initial admin failed", zap.Error(err))
 	}
+	wsHub := ws.NewHub(logger)
 	mlClient := service.NewMLClient(cfg.ML.ServiceURL, cfg.ML.Timeout)
 	notifications := service.NewNotificationService(cfg.Telegram, alerts, logger)
-	ingest := service.NewLogIngestService(clickhouse, incidents, mlClient, notifications, logger, cfg.ML.WindowSizeSeconds)
+	ingest := service.NewLogIngestService(clickhouse, incidents, mlClient, notifications, wsHub, logger, cfg.ML.WindowSizeSeconds)
 	authH := handler.NewAuthHandler(authSvc)
 	agentH := handler.NewAgentHandler(agents, ingest)
-	incH := handler.NewIncidentHandler(incidents, clickhouse)
+	incH := handler.NewIncidentHandler(incidents, clickhouse, wsHub)
 	statsH := handler.NewStatsHandler(incidents, clickhouse)
 	healthH := handler.NewHealthHandler(pg, clickhouse, mlClient, cfg.App.Version)
+	wsH := handler.NewWsHandler(wsHub, logger)
 	r := mux.NewRouter()
 	r.Use(mux.MiddlewareFunc(middleware.Recover(logger)))
 	r.Use(mux.MiddlewareFunc(middleware.Logging(logger)))
@@ -77,6 +80,7 @@ func main() {
 	admin.HandleFunc("/incidents/{id}", incH.Get).Methods(http.MethodGet)
 	admin.HandleFunc("/incidents/{id}/status", incH.UpdateStatus).Methods(http.MethodPut)
 	admin.HandleFunc("/stats", statsH.Stats).Methods(http.MethodGet)
+	admin.Handle("/ws", wsH)
 	srv := &http.Server{Addr: ":" + cfg.App.Port, Handler: r, ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		logger.Info("backend started", zap.String("addr", srv.Addr))
