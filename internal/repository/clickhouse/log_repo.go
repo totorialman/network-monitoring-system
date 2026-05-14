@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
 	"sync/atomic"
 
 	_ "github.com/ClickHouse/clickhouse-go/v2"
@@ -17,7 +18,10 @@ type LogRepo struct {
 }
 
 func New(cfg config.ClickHouseConfig) (*LogRepo, error) {
-	dsn := fmt.Sprintf("clickhouse://%s:%s@%s:%s/%s?dial_timeout=10s", cfg.User, cfg.Password, cfg.Host, cfg.Port, cfg.Database)
+	dsn := fmt.Sprintf("clickhouse://%s:%s@%s:%s/%s?dial_timeout=10s",
+		url.QueryEscape(cfg.User),
+		url.QueryEscape(cfg.Password),
+		cfg.Host, cfg.Port, cfg.Database)
 	db, err := sql.Open("clickhouse", dsn)
 	if err != nil {
 		return nil, err
@@ -102,26 +106,21 @@ func (r *LogRepo) BatchInsert(ctx context.Context, logs []domain.NetworkLog) err
 }
 
 // Count возвращает актуальное количество сырых логов в ClickHouse.
-// Использует локальный атомарный счётчик для мгновенного ответа без лишних запросов.
 // При первом вызове или после перезапуска синхронизируется с ClickHouse.
 func (r *LogRepo) Count(ctx context.Context) int64 {
-	// Всегда запрашиваем актуальное значение из ClickHouse
 	var n int64
 	err := r.db.QueryRowContext(ctx, `SELECT count() FROM network_logs`).Scan(&n)
 	if err != nil {
-		// При ошибке возвращаем последнее известное значение из атомарного счётчика
 		if cached := r.lastKnownCount.Load(); cached > 0 {
 			return cached
 		}
 		return 0
 	}
-	// Синхронизируем атомарный счётчик с реальным значением из ClickHouse
 	r.lastKnownCount.Store(n)
 	return n
 }
 
 // RawSample возвращает сырые логи из ClickHouse для указанного агента.
-// Используется фронтендом для «разворачивания» инцидента и просмотра исходных данных.
 func (r *LogRepo) RawSample(ctx context.Context, agentID string, limit int) []map[string]any {
 	if limit <= 0 {
 		limit = 100
