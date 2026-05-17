@@ -101,6 +101,7 @@ func main() {
 	admin.HandleFunc("/incidents/{id}", incH.Get).Methods(http.MethodGet)
 	admin.HandleFunc("/incidents/{id}/status", incH.UpdateStatus).Methods(http.MethodPut)
 	admin.HandleFunc("/stats", statsH.Stats).Methods(http.MethodGet)
+	admin.HandleFunc("/telegram/test", telegramH.Test).Methods(http.MethodPost)
 
 	srv := &http.Server{Addr: ":" + cfg.App.Port, Handler: r, ReadHeaderTimeout: 10 * time.Second}
 	go func() {

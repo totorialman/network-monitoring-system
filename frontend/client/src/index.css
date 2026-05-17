@@ -105,6 +105,7 @@ Design philosophy: Swiss Cybernetic Control Room. Global theme enforces graphite
 .brand-mark svg { color: #22d3ee; filter: drop-shadow(0 0 12px rgba(34,211,238,.6)); }
 .eyebrow { margin: 0 0 10px; color: #67e8f9; font-family: "IBM Plex Mono"; font-size: 11px; letter-spacing: .18em; text-transform: uppercase; }
 .login-panel h1 { font-size: clamp(32px, 5vw, 58px); line-height: 1.05; margin: 20px 0 14px; color: #f8fafc; }
+.login-title { font-size: clamp(26px, 4vw, 42px) !important; }
 .login-copy { color: #b8c7d8; font-size: 15px; line-height: 1.65; max-width: 470px; }
 .login-form { display: grid; gap: 14px; margin-top: 26px; }
 .login-form label, .filters label { display: grid; gap: 8px; color: #9fb5c9; font-size: 13px; }
@@ -147,7 +148,7 @@ input:focus, select:focus, textarea:focus { border-color: rgba(34, 211, 238, .65
 .dashboard-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; }
 .section-head.wide { grid-column: 1 / -1; margin-bottom: 0; }
 .metric-card { min-height: 132px; border-radius: 22px; padding: 20px; display: flex; align-items: flex-start; gap: 14px; position: relative; overflow: hidden; }
-.metric-card::after { content: ""; position: absolute; inset: auto -20% -45% 35%; height: 120px; background: radial-gradient(circle, rgba(34,211,238,.18), transparent 70%); }
+.metric-card::after { content: ""; position: absolute; inset: auto -20% -45% 35%; height: 120px; background: radial-gradient(ellipse at center, rgba(34,211,238,.08) 0%, rgba(34,211,238,.04) 40%, transparent 75%); }
 .metric-card svg { color: #22d3ee; width: 24px; height: 24px; }
 .metric-card.tone-amber svg { color: #f59e0b; }
 .metric-card.tone-red svg { color: #f87171; }
@@ -195,6 +196,7 @@ button.incident-row:hover { border-color: rgba(34,211,238,.34); background: rgba
 .inspector h3 { color: #e5f6ff; margin: 20px 0 8px; }
 pre { max-height: 220px; overflow: auto; padding: 14px; border-radius: 14px; background: rgba(2,6,23,.72); color: #b7f3ff; border: 1px solid rgba(125,211,252,.13); font-size: 12px; }
 .status-form { display: grid; gap: 12px; margin-top: 18px; }
+.chart-card.full-width { grid-column: 1 / -1; }
 @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 @media (max-width: 1180px) { .dashboard-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .agent-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .chart-card.large { grid-column: span 2; } }

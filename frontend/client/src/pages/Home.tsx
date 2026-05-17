@@ -8,7 +8,6 @@ import {
   BarChart3,
   CheckCircle2,
   Copy,
-  FileDown,
   KeyRound,
   LogOut,
   Network,
@@ -16,7 +15,6 @@ import {
   RadioTower,
   RefreshCw,
   Search,
-  Settings,
   ShieldAlert,
   TerminalSquare,
   UserRound,
@@ -147,22 +145,6 @@ function threatLabel(t: string): string {
 
 const PERIOD_LABELS: Record<string, string> = { "1h": "1 час", "6h": "6 часов", "24h": "24 часа", "7d": "7 дней", "30d": "30 дней" };
 
-function exportIncidentsCSV(incidents: Incident[]) {
-  const header = "ID,Агент,Тип угрозы,Критичность,ML оценка,Статус,Создан\n";
-  const rows = incidents.map((i) =>
-    `${i.id},${i.agent_name || i.agent_id},${threatLabel(i.threat_type)},${i.severity},${i.ml_score.toFixed(2)},${statusLabel(i.status)},${formatDate(i.created_at)}`
-  ).join("\n");
-  const bom = "\uFEFF";
-  const blob = new Blob([bom + header + rows], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `fluxmon_incidents_${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-  toast.success("CSV экспортирован");
-}
-
 function LoginScreen({ onLogin }: { onLogin: (token: string) => void }) {
   const [login, setLogin] = useState("admin");
   const [password, setPassword] = useState("");
@@ -186,7 +168,7 @@ function LoginScreen({ onLogin }: { onLogin: (token: string) => void }) {
       <section className="login-panel">
         <div className="brand-mark"><ShieldAlert size={22} /><span>FluxMon</span></div>
         <p className="eyebrow">ДОСТУП АДМИНИСТРАТОРА</p>
-        <h1>Серверное приложение для мониторинга состояния сети и обнаружения потенциальных угроз</h1>
+        <h1 class="login-title">FluxMon — мониторинг и обнаружение сетевых угроз</h1>
         <p className="login-copy">Авторизуйтесь для доступа к панели управления, графикам, инцидентам, списку агентов и управлению реагированием.</p>
         <form onSubmit={submit} className="login-form">
           <label>Логин администратора<input value={login} onChange={(e) => setLogin(e.target.value)} autoComplete="username" required /></label>
@@ -232,7 +214,7 @@ function Dashboard({ stats, period, setPeriod }: { stats: StatsResponse; period:
       <MetricCard icon={<RadioTower />} label="Активных агентов" value={formatNumber(stats.overview.active_agents)} hint="последняя активность" />
       <MetricCard icon={<Activity />} label="Логов обработано" value={formatNumber(stats.overview.total_logs_processed)} hint={`сред. ML ${stats.overview.avg_ml_score.toFixed(2)}`} />
 
-      <article className="chart-card large">
+      <article className="chart-card full-width">
         <h3>Инциденты и объём логов</h3>
         <ResponsiveContainer width="100%" height={310}>
           <AreaChart data={stats.timeseries || []}>
@@ -267,7 +249,7 @@ function Dashboard({ stats, period, setPeriod }: { stats: StatsResponse; period:
             <CartesianGrid stroke="#1e3a4a" strokeDasharray="3 3" />
             <XAxis dataKey="timestamp" tickFormatter={(v: string) => new Date(v).getHours() + ":00"} stroke="#7dd3fc" />
             <YAxis stroke="#64748b" />
-            <Tooltip contentStyle={{ background: "#07111d", border: "1px solid #164e63", color: "#e2e8f0" }} />
+            <Tooltip contentStyle={{ background: "#07111d", border: "1px solid #164e63", color: "#e2e8f0" }} formatter={(value: number) => value.toFixed(2)} />
             <Bar dataKey="avg_severity" fill="#f59e0b" radius={[4, 4, 0, 0]} name="Критичность" />
           </BarChart>
         </ResponsiveContainer>
@@ -280,7 +262,7 @@ function Dashboard({ stats, period, setPeriod }: { stats: StatsResponse; period:
             <BarChart layout="vertical" data={stats.top_sources || []}>
               <CartesianGrid stroke="#1e3a4a" strokeDasharray="3 3" />
               <XAxis type="number" stroke="#64748b" />
-              <YAxis type="category" dataKey="ip" stroke="#7dd3fc" width={120} tick={{ fontSize: 12 }} />
+              <YAxis type="category" dataKey="ip" stroke="#7dd3fc" width={150} tick={{ fontSize: 11 }} />
               <Tooltip contentStyle={{ background: "#07111d", border: "1px solid #164e63", color: "#e2e8f0" }} />
               <Bar dataKey="incident_count" fill="#22d3ee" radius={[0, 4, 4, 0]} name="Инцидентов" />
             </BarChart>
@@ -288,9 +270,6 @@ function Dashboard({ stats, period, setPeriod }: { stats: StatsResponse; period:
         ) : (
           <div className="source-row"><span>Нет данных за выбранный период</span></div>
         )}
-        {(stats.top_sources || []).map((source) => (
-          <div className="source-row" key={source.ip}><code>{source.ip}</code><span>{source.incident_count} инцидентов</span><small>{source.threat_types.map(t => threatLabel(t)).join(", ")}</small></div>
-        ))}
       </article>
     </section>
   );
@@ -304,16 +283,14 @@ function Incidents({ incidents, onOpen, onRefresh }: { incidents: Incident[]; on
   const filtered = incidents.filter((item) =>
     (status === "all" || item.status === status) &&
     (threatTypeFilter === "all" || item.threat_type === threatTypeFilter) &&
+    (ipFilter === "" || (item.agent_id || "").includes(ipFilter) || (item.agent_name || "").includes(ipFilter)) &&
     `${item.id} ${item.agent_name} ${item.threat_type}`.toLowerCase().includes(query.toLowerCase())
   );
   return (
     <section className="panel-block">
       <div className="section-head">
         <div><p className="eyebrow">ОЧЕРЕДЬ ИНЦИДЕНТОВ</p><h2>Инциденты</h2></div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button className="ghost-action" onClick={() => exportIncidentsCSV(filtered)}><FileDown size={16} /> CSV</button>
-          <button className="ghost-action" onClick={onRefresh}><RefreshCw size={16} /> Обновить</button>
-        </div>
+        <button className="ghost-action" onClick={onRefresh}><RefreshCw size={16} /> Обновить</button>
       </div>
       <div className="filters">
         <label><Search size={16} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Поиск по агенту, угрозе, ID" /></label>
@@ -433,71 +410,7 @@ function IncidentInspector({ incident, token, onClose, onUpdated }: { incident: 
   );
 }
 
-function SettingsPage({ token }: { token: string }) {
-  const [tab, setTab] = useState<"security" | "notifications">("security");
-  const [oldPassword, setOldPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [changingPassword, setChangingPassword] = useState(false);
-
-  const [chatId, setChatId] = useState("");
-  const [minSeverity, setMinSeverity] = useState("3");
-  const [minMLScore, setMinMLScore] = useState("0.6");
-  const [testingNotify, setTestingNotify] = useState(false);
-
-  async function changePassword(event: React.FormEvent) {
-    event.preventDefault();
-    setChangingPassword(true);
-    try {
-      await apiFetch("/api/auth/change-password", token, { method: "PUT", body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }) });
-      toast.success("Пароль изменён");
-      setOldPassword("");
-      setNewPassword("");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Не удалось сменить пароль");
-    } finally { setChangingPassword(false); }
-  }
-
-  async function testNotification() {
-    setTestingNotify(true);
-    try {
-      await apiFetch("/api/telegram/test", token, { method: "POST" });
-      toast.success("Тестовое уведомление отправлено");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Не удалось отправить тестовое уведомление");
-    } finally { setTestingNotify(false); }
-  }
-
-  return (
-    <section className="panel-block">
-      <div className="section-head">
-        <div><p className="eyebrow">КОНФИГУРАЦИЯ</p><h2>Настройки системы</h2></div>
-      </div>
-      <div className="settings-tabs" style={{ display: "flex", gap: 8, marginBottom: 24 }}>
-        <button className={`ghost-action ${tab === "security" ? "active" : ""}`} onClick={() => setTab("security")}>Безопасность</button>
-        <button className={`ghost-action ${tab === "notifications" ? "active" : ""}`} onClick={() => setTab("notifications")}>Уведомления</button>
-      </div>
-      {tab === "security" && (
-        <form onSubmit={changePassword} className="settings-form" style={{ maxWidth: 420 }}>
-          <label>Текущий пароль<input value={oldPassword} onChange={(e) => setOldPassword(e.target.value)} type="password" required /></label>
-          <label>Новый пароль<input value={newPassword} onChange={(e) => setNewPassword(e.target.value)} type="password" minLength={8} required /></label>
-          <button className="primary-action" disabled={changingPassword}>{changingPassword ? "Смена..." : "Сменить пароль"}</button>
-        </form>
-      )}
-      {tab === "notifications" && (
-        <div className="settings-form" style={{ maxWidth: 420 }}>
-          <label>Telegram Chat ID<input value={chatId} onChange={(e) => setChatId(e.target.value)} placeholder="745645351" /></label>
-          <label>Мин. критичность для уведомлений<select value={minSeverity} onChange={(e) => setMinSeverity(e.target.value)}>
-            <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
-          </select></label>
-          <label>Мин. ML-оценка для уведомлений<input value={minMLScore} onChange={(e) => setMinMLScore(e.target.value)} type="number" step="0.05" min="0" max="1" /></label>
-          <button className="ghost-action" onClick={testNotification} disabled={testingNotify}>{testingNotify ? "Отправка..." : "Тестовое уведомление"}</button>
-        </div>
-      )}
-    </section>
-  );
-}
-
-type Section = "dashboard" | "incidents" | "agents" | "settings";
+type Section = "dashboard" | "incidents" | "agents";
 
 export default function Home() {
   const [token, setToken] = useState(() => localStorage.getItem("nm_jwt") || "");
@@ -577,8 +490,7 @@ export default function Home() {
 
   const topbarTitle = section === "dashboard" ? "Панель управления"
     : section === "incidents" ? "Реагирование на инциденты"
-    : section === "agents" ? "Реестр агентов"
-    : "Настройки системы";
+    : "Реестр агентов";
 
   return (
     <main className="app-shell" style={{ backgroundImage: `linear-gradient(rgba(5,10,18,.92), rgba(5,10,18,.96)), url(${GRID_IMAGE})` }}>
@@ -587,7 +499,6 @@ export default function Home() {
         <button className={section === "dashboard" ? "active" : ""} onClick={() => navTo("dashboard")}><BarChart3 /> Дашборд</button>
         <button className={section === "incidents" ? "active" : ""} onClick={() => navTo("incidents")}><ShieldAlert /> Инциденты</button>
         <button className={section === "agents" ? "active" : ""} onClick={() => navTo("agents")}><RadioTower /> Агенты</button>
-        <button className={section === "settings" ? "active" : ""} onClick={() => navTo("settings")}><Settings size={16} /> Настройки</button>
         <button className="logout" onClick={() => { localStorage.removeItem("nm_jwt"); setToken(""); }}><LogOut /> Выход</button>
       </nav>
       <div className="workbench">
@@ -602,7 +513,6 @@ export default function Home() {
         {section === "dashboard" && <Dashboard stats={stats} period={period} setPeriod={setPeriod} />}
         {section === "incidents" && <Incidents incidents={incidents} onOpen={setSelectedIncident} onRefresh={loadData} />}
         {section === "agents" && <Agents token={token} agents={agents} onRefresh={loadData} />}
-        {section === "settings" && <SettingsPage token={token} />}
       </div>
       <IncidentInspector incident={selectedIncident} token={token} onClose={() => setSelectedIncident(null)} onUpdated={loadData} />
     </main>

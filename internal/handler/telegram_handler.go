@@ -168,6 +168,39 @@ func (h *TelegramHandler) answerCallback(callbackID, text string, showAlert bool
 	}
 }
 
+// Test отправляет тестовое сообщение администратору.
+func (h *TelegramHandler) Test(w http.ResponseWriter, r *http.Request) {
+	if h.cfg.BotToken == "" || h.cfg.AdminChatID == "" {
+		http.Error(w, `{"error":"telegram not configured"}`, http.StatusServiceUnavailable)
+		return
+	}
+	msg := "✅ FluxMon: тестовое уведомление. Система мониторинга работает корректно."
+	payload := map[string]any{
+		"chat_id": h.cfg.AdminChatID,
+		"text":    msg,
+	}
+	body, _ := json.Marshal(payload)
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", h.cfg.BotToken)
+	req, _ := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := h.client.Do(req)
+	if err != nil {
+		h.logger.Error("telegram test: send failed", zap.Error(err))
+		http.Error(w, `{"error":"send failed"}`, http.StatusInternalServerError)
+		return
+	}
+	if resp != nil && resp.Body != nil {
+		resp.Body.Close()
+	}
+	if resp.StatusCode >= 300 {
+		h.logger.Error("telegram test: non-OK status", zap.Int("status", resp.StatusCode))
+		http.Error(w, `{"error":"telegram api error"}`, http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"ok":true}`))
+}
+
 // RegisterWebhook регистрирует webhook URL в Telegram Bot API.
 func RegisterWebhook(cfg config.TelegramConfig, logger *zap.Logger) {
 	if cfg.BotToken == "" {
