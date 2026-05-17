@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"sync/atomic"
 
-	"github.com/google/uuid"
 	_ "github.com/ClickHouse/clickhouse-go/v2"
 	"network-monitor-backend/internal/config"
 	"network-monitor-backend/internal/domain"
@@ -131,13 +130,6 @@ func (r *LogRepo) RawSample(ctx context.Context, agentID string, limit int) []ma
 		limit = 1000
 	}
 
-	// Парсим agentID как UUID для корректной работы с ClickHouse через драйвер
-	agentUUID, err := uuid.Parse(agentID)
-	if err != nil {
-		log.Printf("ERROR: clickhouse RawSample invalid agent_id %q: %v", agentID, err)
-		return []map[string]any{}
-	}
-
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
 			timestamp,
@@ -156,10 +148,10 @@ func (r *LogRepo) RawSample(ctx context.Context, agentID string, limit int) []ma
 			vlan,
 			eth_type
 		FROM network_logs
-		WHERE agent_id = ?
+		WHERE agent_id = toUUID(?)
 		ORDER BY timestamp DESC
 		LIMIT ?
-	`, agentUUID, limit)
+	`, agentID, limit)
 	if err != nil {
 		log.Printf("ERROR: clickhouse RawSample query failed for agent_id=%s: %v", agentID, err)
 		return []map[string]any{}

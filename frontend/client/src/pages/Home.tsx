@@ -131,7 +131,7 @@ function statusClass(status: string) {
 
 function statusLabel(status: string): string {
   const map: Record<string, string> = {
-    new: "Новый", investigating: "В работу", resolved: "Решён", false_positive: "Ложное срабатывание",
+    new: "Новый", investigating: "Расследование", resolved: "Решён", false_positive: "Ложное срабатывание",
   };
   return map[status] || status;
 }
@@ -181,12 +181,14 @@ function LoginScreen({ onLogin }: { onLogin: (token: string) => void }) {
   );
 }
 
-function MetricCard({ icon, label, value, hint, tone = "cyan" }: { icon: React.ReactNode; label: string; value: string; hint: string; tone?: string }) {
-  return <article className={`metric-card tone-${tone}`}>{icon}<div><span>{label}</span><strong>{value}</strong><small>{hint}</small></div></article>;
+function MetricCard({ icon, label, value, hint, tone = "cyan", glow = false }: { icon: React.ReactNode; label: string; value: string; hint: string; tone?: string; glow?: boolean }) {
+  return <article className={`metric-card tone-${tone}${glow ? " pulse-glow" : ""}`}>{icon}<div><span>{label}</span><strong className="counter-value">{value}</strong><small>{hint}</small></div></article>;
 }
 
 function Dashboard({ stats, period, setPeriod }: { stats: StatsResponse; period: string; setPeriod: (v: string) => void }) {
-  const distribution = Object.entries(stats.threat_distribution || {}).map(([name, value]) => ({ name, value }));
+  const distribution = Object.entries(stats.threat_distribution || {})
+    .filter(([, value]) => value > 0)
+    .map(([name, value]) => ({ name, value }));
   const colors = ["#22d3ee", "#f59e0b", "#ef4444", "#94a3b8"];
 
   const renderPieTooltip = useCallback((props: any) => {
@@ -210,7 +212,7 @@ function Dashboard({ stats, period, setPeriod }: { stats: StatsResponse; period:
         </select>
       </div>
       <MetricCard icon={<ShieldAlert />} label="Всего инцидентов" value={formatNumber(stats.overview.total_incidents)} hint={`за ${PERIOD_LABELS[period] || period}`} tone="amber" />
-      <MetricCard icon={<AlertTriangle />} label="Новые" value={formatNumber(stats.overview.new_incidents)} hint="требуют реакции" tone="red" />
+      <MetricCard icon={<AlertTriangle />} label="Новые" value={formatNumber(stats.overview.new_incidents)} hint="требуют реакции" tone="red" glow={stats.overview.new_incidents > 0} />
       <MetricCard icon={<RadioTower />} label="Активных агентов" value={formatNumber(stats.overview.active_agents)} hint="последняя активность" />
       <MetricCard icon={<Activity />} label="Логов обработано" value={formatNumber(stats.overview.total_logs_processed)} hint={`сред. ML ${stats.overview.avg_ml_score.toFixed(2)}`} />
 
@@ -229,20 +231,24 @@ function Dashboard({ stats, period, setPeriod }: { stats: StatsResponse; period:
         </ResponsiveContainer>
       </article>
 
-      <article className="chart-card">
+      <article className="chart-card span-2">
         <h3>Типы угроз</h3>
-        <ResponsiveContainer width="100%" height={260}>
-          <PieChart>
-            <Pie data={distribution} dataKey="value" nameKey="name" innerRadius={60} outerRadius={95} label={{ fill: '#e2e8f0', fontSize: 12 }}>
-              {distribution.map((_, index) => <Cell key={index} fill={colors[index % colors.length]} />)}
-            </Pie>
-            <Tooltip content={renderPieTooltip} />
-          </PieChart>
-        </ResponsiveContainer>
-        <div className="legend-list">{distribution.map((item, index) => <span key={item.name}><i style={{ background: colors[index % colors.length] }} />{item.name}: {item.value}</span>)}</div>
+        {distribution.length > 0 ? (
+          <ResponsiveContainer width="100%" height={260}>
+            <PieChart>
+              <Pie data={distribution} dataKey="value" nameKey="name" innerRadius={60} outerRadius={95} label={{ fill: '#e2e8f0', fontSize: 12 }}>
+                {distribution.map((_, index) => <Cell key={index} fill={colors[index % colors.length]} />)}
+              </Pie>
+              <Tooltip content={renderPieTooltip} />
+            </PieChart>
+          </ResponsiveContainer>
+        ) : (
+          <div className="source-row"><span>Нет данных за выбранный период</span></div>
+        )}
+        {distribution.length > 0 && <div className="legend-list">{distribution.map((item, index) => <span key={item.name}><i style={{ background: colors[index % colors.length] }} />{item.name}: {item.value}</span>)}</div>}
       </article>
 
-      <article className="chart-card">
+      <article className="chart-card span-2">
         <h3>Средняя критичность</h3>
         <ResponsiveContainer width="100%" height={260}>
           <BarChart data={stats.timeseries}>
@@ -299,7 +305,7 @@ function Incidents({ incidents, totalPages, page, setPage, onOpen, onRefresh }: 
           <option value="all">Все угрозы</option><option value="ddos">DDoS</option><option value="port_scan">Сканирование портов</option><option value="anomaly">Аномалия</option><option value="traffic">Трафик</option>
         </select>
         <select value={status} onChange={(e) => setStatus(e.target.value)}>
-          <option value="all">Все статусы</option><option value="new">Новый</option><option value="investigating">В работу</option><option value="resolved">Решён</option><option value="false_positive">Ложное срабатывание</option>
+          <option value="all">Все статусы</option><option value="new">Новый</option><option value="investigating">Расследование</option><option value="resolved">Решён</option><option value="false_positive">Ложное срабатывание</option>
         </select>
       </div>
       <div className="incident-table">
@@ -407,7 +413,7 @@ function IncidentInspector({ incident, token, onClose, onUpdated }: { incident: 
         {logsLoading ? <p className="muted">Загрузка...</p> : <pre>{JSON.stringify(rawLogs || [], null, 2)}</pre>}
         <form onSubmit={updateStatus} className="status-form">
           <select value={status} onChange={(e) => setStatus(e.target.value)}>
-            <option value="new">Новый</option><option value="investigating">В работу</option><option value="resolved">Решён</option><option value="false_positive">Ложное срабатывание</option>
+            <option value="new">Новый</option><option value="investigating">Расследование</option><option value="resolved">Решён</option><option value="false_positive">Ложное срабатывание</option>
           </select>
           <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Комментарий расследования" />
           <button className="primary-action"><CheckCircle2 size={16} /> Обновить статус</button>
@@ -467,7 +473,6 @@ export default function Home() {
           if (msg.type === "new_incident") {
             const inc = msg.payload as { id: string; threat_type: string; log_count: number };
             toast.info(`Новый инцидент: ${threatLabel(inc.threat_type || "")} (${inc.log_count || 0} логов)`);
-            // Запрашиваем полный инцидент по ID, чтобы получить agent_name, summary, details и т.д.
             apiFetch<Incident>(`/api/incidents/${inc.id}`, token)
               .then((fullIncident) => {
                 setIncidents((prev) => {
@@ -484,7 +489,6 @@ export default function Home() {
                 }));
               })
               .catch(() => {
-                // Если не удалось получить полный инцидент — всё равно обновляем счётчики
                 setStats((prev) => ({
                   ...prev,
                   overview: {
@@ -533,10 +537,10 @@ export default function Home() {
     <main className="app-shell" style={{ backgroundImage: `linear-gradient(rgba(5,10,18,.92), rgba(5,10,18,.96)), url(${GRID_IMAGE})` }}>
       <nav className="side-rail">
         <div className="brand-mark"><ShieldAlert size={22} /><span>FluxMon</span></div>
-        <button className={section === "dashboard" ? "active" : ""} onClick={() => navTo("dashboard")}><BarChart3 /> Дашборд</button>
-        <button className={section === "incidents" ? "active" : ""} onClick={() => navTo("incidents")}><ShieldAlert /> Инциденты</button>
-        <button className={section === "agents" ? "active" : ""} onClick={() => navTo("agents")}><RadioTower /> Агенты</button>
-        <button className="logout" onClick={() => { localStorage.removeItem("nm_jwt"); setToken(""); }}><LogOut /> Выход</button>
+        <button className={section === "dashboard" ? "active" : ""} onClick={() => navTo("dashboard")}><BarChart3 /> <span className="nav-label">Дашборд</span></button>
+        <button className={section === "incidents" ? "active" : ""} onClick={() => navTo("incidents")}><ShieldAlert /> <span className="nav-label">Инциденты</span></button>
+        <button className={section === "agents" ? "active" : ""} onClick={() => navTo("agents")}><RadioTower /> <span className="nav-label">Агенты</span></button>
+        <button className="logout" onClick={() => { localStorage.removeItem("nm_jwt"); setToken(""); }}><LogOut /> <span className="nav-label">Выход</span></button>
       </nav>
       <div className="workbench">
         <header className="topbar">

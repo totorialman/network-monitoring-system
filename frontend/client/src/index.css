@@ -210,14 +210,17 @@ pre { max-height: 220px; overflow: auto; padding: 14px; border-radius: 14px; bac
   0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
   50% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
 }
-.metric-card.tone-red {
+.metric-card.pulse-glow {
   animation: pulse-glow 3s ease-in-out infinite;
 }
+.chart-card.span-2 { grid-column: span 2; }
+.nav-label { display: inline; }
 @media (max-width: 1180px) { .dashboard-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .agent-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .chart-card.large { grid-column: span 2; } }
 @media (max-width: 860px) {
   .app-shell { grid-template-columns: 1fr; }
   .side-rail { position: fixed; bottom: 0; left: 0; right: 0; height: auto; flex-direction: row; overflow-x: auto; padding: 8px 12px; z-index: 50; border-right: none; border-top: 1px solid rgba(34,211,238,.16); background: rgba(5,10,18,.94); backdrop-filter: blur(24px); gap: 4px; }
   .side-rail .brand-mark { display: none; }
+  .nav-label { display: none; }
   .side-rail button { min-height: 40px; padding: 0 10px; font-size: 12px; border-radius: 10px; }
   .side-rail button svg { width: 16px; }
   .side-rail .logout { margin-top: 0; margin-left: 4px; }
