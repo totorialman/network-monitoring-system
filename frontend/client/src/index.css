@@ -196,8 +196,9 @@ button.incident-row:hover { border-color: rgba(34,211,238,.34); background: rgba
 .agent-card svg { color: #22d3ee; }
 .agent-card p { color: #9fb5c9; margin: 9px 0; font-size: 13px; }
 .agent-card code { color: #cffafe; }
-.inspector { position: fixed; inset: 0 0 0 auto; width: min(100%, 520px); background: linear-gradient(90deg, transparent, rgba(5,10,18,.78) 18%); z-index: 40; display: flex; justify-content: flex-end; animation: fade .16s ease both; }
-.inspector-card { width: min(100%, 500px); min-height: 100%; border-radius: 26px 0 0 26px; padding: 28px; overflow: auto; }
+.inspector { position: fixed; inset: 0 0 0 auto; width: min(100%, 520px); z-index: 40; display: flex; justify-content: flex-end; animation: fade .16s ease both; }
+.inspector-backdrop { position: fixed; inset: 0; background: rgba(5,10,18,.55); z-index: 39; animation: fade .16s ease both; }
+.inspector-card { position: relative; z-index: 41; width: min(100%, 500px); min-height: 100%; border-radius: 26px 0 0 26px; padding: 28px; overflow: auto; background: linear-gradient(135deg, rgba(8, 20, 34, .92), rgba(12, 27, 43, .82)); border-left: 1px solid rgba(34, 211, 238, 0.12); box-shadow: 0 24px 80px rgba(0, 0, 0, .34); backdrop-filter: blur(24px); }
 .close { float: right; width: 36px; height: 36px; border-radius: 12px; border: 1px solid rgba(125,211,252,.22); background: rgba(7,17,29,.8); color: #e2e8f0; font-size: 24px; }
 .inspector h2 { margin: 12px 0 6px; font-size: 30px; color: #fff; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .muted { color: #8da7ba; }
@@ -233,13 +234,17 @@ pre { max-height: 220px; overflow: auto; padding: 14px; border-radius: 14px; bac
   .incident-row { grid-template-columns: 1fr 1fr; min-height: auto; padding: 14px; }
   .incident-row.header { display: none; }
   .agent-form, .agent-grid { grid-template-columns: 1fr; }
-  .inspector { width: 100%; }
-  .inspector-card { border-radius: 20px 20px 0 0; width: 100%; }
+    .inspector { width: 100%; }
+    .inspector-card { border-radius: 20px 20px 0 0; width: 100%; }
+    .inspector-backdrop { display: none; }
 }
 @media (max-width: 620px) {
   .dashboard-grid { grid-template-columns: 1fr; }
   .chart-card.large { grid-column: span 1; }
   .chart-card.full-width { grid-column: span 1; }
+  .chart-card.span-2 { grid-column: span 1; }
+  .app-shell { display: block; }
+  .side-rail { position: sticky; top: 0; }
   .metric-card { min-height: 110px; }
   .metric-card strong { font-size: 28px; }
   .topbar h1 { font-size: 28px; }

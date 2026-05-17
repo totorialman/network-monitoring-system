@@ -396,6 +396,7 @@ function IncidentInspector({ incident, token, onClose, onUpdated }: { incident: 
 
   return (
     <aside className="inspector">
+      <div className="inspector-backdrop" onClick={onClose} />
       <div className="inspector-card">
         <button className="close" onClick={onClose}>×</button>
         <p className="eyebrow">ДЕТАЛИ ИНЦИДЕНТА</p>
