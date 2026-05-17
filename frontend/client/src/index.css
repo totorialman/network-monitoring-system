@@ -69,12 +69,16 @@ Design philosophy: Swiss Cybernetic Control Room. Glass-morphism with cyberpunk 
 @layer base {
   * { @apply border-border outline-ring/50; }
   html { background: #050a12; }
-  body {
+body {
     @apply bg-background text-foreground;
     margin: 0;
     font-family: "IBM Plex Sans", system-ui, sans-serif;
     min-width: 320px;
   }
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(34, 211, 238, 0.25); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(34, 211, 238, 0.45); }
   h1, h2, h3 { font-family: "Space Grotesk", system-ui, sans-serif; letter-spacing: -0.03em; }
   code, pre { font-family: "IBM Plex Mono", ui-monospace, monospace; }
   button:not(:disabled), [role="button"]:not([aria-disabled="true"]), a[href], select:not(:disabled), input[type="checkbox"]:not(:disabled), input[type="radio"]:not(:disabled) { @apply cursor-pointer; }
@@ -218,13 +222,13 @@ pre { max-height: 220px; overflow: auto; padding: 14px; border-radius: 14px; bac
 @media (max-width: 1180px) { .dashboard-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .agent-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .chart-card.large { grid-column: span 2; } }
 @media (max-width: 860px) {
   .app-shell { grid-template-columns: 1fr; }
-  .side-rail { position: fixed; bottom: 0; left: 0; right: 0; height: auto; flex-direction: row; overflow-x: auto; padding: 8px 12px; z-index: 50; border-right: none; border-top: 1px solid rgba(34,211,238,.16); background: rgba(5,10,18,.94); backdrop-filter: blur(24px); gap: 4px; }
+  .side-rail { position: sticky; top: 0; height: auto; flex-direction: row; overflow-x: auto; padding: 8px 12px; z-index: 50; border-right: none; border-bottom: 1px solid rgba(34,211,238,.16); background: rgba(5,10,18,.94); backdrop-filter: blur(24px); gap: 4px; flex-shrink: 0; }
   .side-rail .brand-mark { display: none; }
   .nav-label { display: none; }
-  .side-rail button { min-height: 40px; padding: 0 10px; font-size: 12px; border-radius: 10px; }
-  .side-rail button svg { width: 16px; }
+  .side-rail button { min-height: 40px; padding: 0 10px; font-size: 0; border-radius: 10px; gap: 0; }
+  .side-rail button svg { width: 20px; height: 20px; }
   .side-rail .logout { margin-top: 0; margin-left: 4px; }
-  .workbench { padding: 20px 14px 100px 14px; }
+  .workbench { padding: 20px 14px 36px; overflow-y: auto; max-height: calc(100vh - 60px); }
   .topbar, .section-head { align-items: flex-start; flex-direction: column; }
   .incident-row { grid-template-columns: 1fr 1fr; min-height: auto; padding: 14px; }
   .incident-row.header { display: none; }
