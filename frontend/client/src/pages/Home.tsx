@@ -465,20 +465,35 @@ export default function Home() {
         try {
           const msg = JSON.parse(event.data);
           if (msg.type === "new_incident") {
-            const inc = msg.payload as { id: string; agent_id: string; threat_type: string; severity: number; ml_score: number; status: string; log_count: number };
+            const inc = msg.payload as { id: string; threat_type: string; log_count: number };
             toast.info(`Новый инцидент: ${threatLabel(inc.threat_type || "")} (${inc.log_count || 0} логов)`);
-            setIncidents((prev) => {
-              if (prev.some((i) => i.id === inc.id)) return prev;
-              return [{ id: inc.id, agent_id: inc.agent_id, threat_type: inc.threat_type, severity: inc.severity, ml_score: inc.ml_score, status: inc.status, created_at: new Date().toISOString() } as Incident, ...prev];
-            });
-            setStats((prev) => ({
-              ...prev,
-              overview: {
-                ...prev.overview,
-                total_incidents: prev.overview.total_incidents + 1,
-                new_incidents: prev.overview.new_incidents + 1,
-              }
-            }));
+            // Запрашиваем полный инцидент по ID, чтобы получить agent_name, summary, details и т.д.
+            apiFetch<Incident>(`/api/incidents/${inc.id}`, token)
+              .then((fullIncident) => {
+                setIncidents((prev) => {
+                  if (prev.some((i) => i.id === fullIncident.id)) return prev;
+                  return [fullIncident, ...prev];
+                });
+                setStats((prev) => ({
+                  ...prev,
+                  overview: {
+                    ...prev.overview,
+                    total_incidents: prev.overview.total_incidents + 1,
+                    new_incidents: prev.overview.new_incidents + 1,
+                  }
+                }));
+              })
+              .catch(() => {
+                // Если не удалось получить полный инцидент — всё равно обновляем счётчики
+                setStats((prev) => ({
+                  ...prev,
+                  overview: {
+                    ...prev.overview,
+                    total_incidents: prev.overview.total_incidents + 1,
+                    new_incidents: prev.overview.new_incidents + 1,
+                  }
+                }));
+              });
           }
           if (msg.type === "incident_updated") {
             toast.info(`Статус инцидента обновлён: ${statusLabel(msg.payload?.status || "")}`);

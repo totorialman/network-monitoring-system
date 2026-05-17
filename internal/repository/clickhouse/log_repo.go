@@ -149,9 +149,9 @@ func (r *LogRepo) RawSample(ctx context.Context, agentID string, limit int) []ma
 			vlan,
 			eth_type
 		FROM network_logs
-		WHERE agent_id = toUUID($1)
+		WHERE agent_id = toUUID(?)
 		ORDER BY timestamp DESC
-		LIMIT $2
+		LIMIT ?
 	`, agentID, limit)
 	if err != nil {
 		log.Printf("ERROR: clickhouse RawSample query failed for agent_id=%s: %v", agentID, err)
