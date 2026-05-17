@@ -83,7 +83,7 @@ services:
     image: postgres:15-alpine
     container_name: nm-postgres
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     environment:
       POSTGRES_USER: nm_user
       POSTGRES_PASSWORD: ${DB_PASSWORD}
@@ -103,8 +103,8 @@ services:
     image: clickhouse/clickhouse-server:23.3-alpine
     container_name: nm-clickhouse
     ports:
-      - "8123:8123"
-      - "9000:9000"
+      - "127.0.0.1:8123:8123"
+      - "127.0.0.1:9000:9000"
     environment:
       CLICKHOUSE_USER: default
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}

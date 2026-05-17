@@ -255,14 +255,14 @@ function Dashboard({ stats, period, setPeriod }: { stats: StatsResponse; period:
         </ResponsiveContainer>
       </article>
 
-      <article className="chart-card sources">
+      <article className="chart-card sources full-width">
         <h3>Основные источники</h3>
         {(stats.top_sources || []).length > 0 ? (
-          <ResponsiveContainer width="100%" height={280}>
+          <ResponsiveContainer width="100%" height={350}>
             <BarChart layout="vertical" data={stats.top_sources || []}>
               <CartesianGrid stroke="#1e3a4a" strokeDasharray="3 3" />
               <XAxis type="number" stroke="#64748b" />
-              <YAxis type="category" dataKey="ip" stroke="#7dd3fc" width={150} tick={{ fontSize: 11 }} />
+              <YAxis type="category" dataKey="ip" stroke="#7dd3fc" width={170} tick={{ fontSize: 12 }} />
               <Tooltip contentStyle={{ background: "#07111d", border: "1px solid #164e63", color: "#e2e8f0" }} />
               <Bar dataKey="incident_count" fill="#22d3ee" radius={[0, 4, 4, 0]} name="Инцидентов" />
             </BarChart>
@@ -275,7 +275,7 @@ function Dashboard({ stats, period, setPeriod }: { stats: StatsResponse; period:
   );
 }
 
-function Incidents({ incidents, onOpen, onRefresh }: { incidents: Incident[]; onOpen: (i: Incident) => void; onRefresh: () => void }) {
+function Incidents({ incidents, totalPages, page, setPage, onOpen, onRefresh }: { incidents: Incident[]; totalPages: number; page: number; setPage: (p: number) => void; onOpen: (i: Incident) => void; onRefresh: () => void }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [threatTypeFilter, setThreatTypeFilter] = useState("all");
@@ -312,6 +312,13 @@ function Incidents({ incidents, onOpen, onRefresh }: { incidents: Incident[]; on
           </button>
         ))}
       </div>
+      {totalPages > 1 && (
+        <div style={{ display: "flex", justifyContent: "center", gap: 12, marginTop: 18 }}>
+          <button className="ghost-action" disabled={page <= 1} onClick={() => setPage(page - 1)}>← Назад</button>
+          <span style={{ color: "#7dd3fc", alignSelf: "center", fontSize: 13 }}>стр. {page} из {totalPages}</span>
+          <button className="ghost-action" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>Вперёд →</button>
+        </div>
+      )}
     </section>
   );
 }
@@ -421,6 +428,8 @@ export default function Home() {
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
   const [period, setPeriod] = useState("24h");
   const [demoMode, setDemoMode] = useState(false);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
 
   const criticalCount = useMemo(() => incidents.filter((i) => i.severity >= 4 && i.status !== "resolved").length, [incidents]);
 
@@ -429,20 +438,21 @@ export default function Home() {
     try {
       const [statsData, incidentsData, agentsData] = await Promise.all([
         apiFetch<StatsResponse>(`/api/stats?period=${period}`, token),
-        apiFetch<{ items: Incident[] }>(`/api/incidents?page=1&limit=50&sort_by=created_at&order=desc&period=${period}`, token),
+        apiFetch<{ items: Incident[]; pagination: { total_pages: number } }>(`/api/incidents?page=${page}&limit=50&sort_by=created_at&order=desc&period=${period}`, token),
         apiFetch<{ items: Agent[] }>("/api/agents", token),
       ]);
       setStats(statsData);
       setIncidents(incidentsData.items || []);
+      setTotalPages(incidentsData.pagination?.total_pages || 1);
       setAgents(agentsData.items || []);
       setDemoMode(false);
     } catch (error) {
       console.error("Failed to load data", error);
       setDemoMode(true);
     }
-  }, [token, period]);
+  }, [token, period, page]);
 
-  // WebSocket — токен передаётся через query-параметр ?token=
+  // WebSocket — delta updates
   useEffect(() => {
     if (!token) return;
     let ws: WebSocket;
@@ -455,12 +465,24 @@ export default function Home() {
         try {
           const msg = JSON.parse(event.data);
           if (msg.type === "new_incident") {
-            toast.info(`Новый инцидент: ${threatLabel(msg.payload?.threat_type || "")} (${msg.payload?.log_count || 0} логов)`);
-            loadData();
+            const inc = msg.payload as { id: string; agent_id: string; threat_type: string; severity: number; ml_score: number; status: string; log_count: number };
+            toast.info(`Новый инцидент: ${threatLabel(inc.threat_type || "")} (${inc.log_count || 0} логов)`);
+            setIncidents((prev) => {
+              if (prev.some((i) => i.id === inc.id)) return prev;
+              return [{ id: inc.id, agent_id: inc.agent_id, threat_type: inc.threat_type, severity: inc.severity, ml_score: inc.ml_score, status: inc.status, created_at: new Date().toISOString() } as Incident, ...prev];
+            });
+            setStats((prev) => ({
+              ...prev,
+              overview: {
+                ...prev.overview,
+                total_incidents: prev.overview.total_incidents + 1,
+                new_incidents: prev.overview.new_incidents + 1,
+              }
+            }));
           }
           if (msg.type === "incident_updated") {
             toast.info(`Статус инцидента обновлён: ${statusLabel(msg.payload?.status || "")}`);
-            loadData();
+            setIncidents((prev) => prev.map((i) => i.id === msg.payload?.incident_id ? { ...i, status: msg.payload?.status } : i));
           }
         } catch { /* ignore */ }
       };
@@ -479,7 +501,7 @@ export default function Home() {
     };
   }, [token, loadData]);
 
-  useEffect(() => { void loadData(); }, [token, period, loadData]);
+  useEffect(() => { void loadData(); }, [token, period, page, loadData]);
 
   function navTo(s: Section) {
     setSection(s);
@@ -511,7 +533,7 @@ export default function Home() {
           </div>
         </header>
         {section === "dashboard" && <Dashboard stats={stats} period={period} setPeriod={setPeriod} />}
-        {section === "incidents" && <Incidents incidents={incidents} onOpen={setSelectedIncident} onRefresh={loadData} />}
+        {section === "incidents" && <Incidents incidents={incidents} totalPages={totalPages} page={page} setPage={setPage} onOpen={setSelectedIncident} onRefresh={loadData} />}
         {section === "agents" && <Agents token={token} agents={agents} onRefresh={loadData} />}
       </div>
       <IncidentInspector incident={selectedIncident} token={token} onClose={() => setSelectedIncident(null)} onUpdated={loadData} />
