@@ -46,7 +46,7 @@ func Load() Config {
 		Postgres:     PostgresConfig{Host: env("DB_POSTGRES_HOST", "localhost"), Port: env("DB_POSTGRES_PORT", "5432"), User: env("DB_POSTGRES_USER", "nm_user"), Password: env("DB_POSTGRES_PASSWORD", env("DB_PASSWORD", "network_monitor")), Database: env("DB_POSTGRES_DB", "network_monitor")},
 		ClickHouse:   ClickHouseConfig{Host: env("DB_CLICKHOUSE_HOST", "localhost"), Port: env("DB_CLICKHOUSE_PORT", "9000"), User: env("DB_CLICKHOUSE_USER", "default"), Password: env("DB_CLICKHOUSE_PASSWORD", env("CLICKHOUSE_PASSWORD", "")), Database: env("DB_CLICKHOUSE_DB", "default")},
 		ML:           MLConfig{ServiceURL: env("ML_SERVICE_URL", "http://localhost:5000"), Timeout: duration("ML_TIMEOUT", 30*time.Second), WindowSizeSeconds: float("ML_WINDOW_SECONDS", 300)},
-		JWT:          JWTConfig{Secret: env("JWT_SECRET", "change-me-minimum-32-characters-secret"), Expiration: duration("JWT_EXPIRATION", 24*time.Hour)},
+		JWT:          JWTConfig{Secret: env("JWT_SECRET", "change-me-minimum-32-characters-secret"), Expiration: duration("JWT_EXPIRATION", 30*24*time.Hour)},
 Telegram:     TelegramConfig{BotToken: env("TELEGRAM_BOT_TOKEN", ""), AdminChatID: env("TELEGRAM_ADMIN_CHAT_ID", ""), WebhookSecret: env("TELEGRAM_WEBHOOK_SECRET", ""), Timeout: duration("TELEGRAM_TIMEOUT", 10*time.Second), RetryCount: integer("TELEGRAM_RETRY_COUNT", 3), MinSeverity: integer("TELEGRAM_MIN_SEVERITY", 3), MinScore: float("TELEGRAM_MIN_ML_SCORE", 0.6), BaseIncidentURL: env("BASE_INCIDENT_URL", "https://fluxmon.ru/incidents")},
 		InitialAdmin: InitialAdminConfig{Login: env("INIT_ADMIN_LOGIN", "admin"), Password: env("INIT_ADMIN_PASSWORD", "ChangeMe123!")},
 	}
