@@ -281,17 +281,7 @@ function Dashboard({ stats, period, setPeriod }: { stats: StatsResponse; period:
   );
 }
 
-function Incidents({ incidents, totalPages, page, setPage, onOpen, onRefresh }: { incidents: Incident[]; totalPages: number; page: number; setPage: (p: number) => void; onOpen: (i: Incident) => void; onRefresh: () => void }) {
-  const [query, setQuery] = useState("");
-  const [status, setStatus] = useState("all");
-  const [threatTypeFilter, setThreatTypeFilter] = useState("all");
-  const [ipFilter, setIpFilter] = useState("");
-  const filtered = incidents.filter((item) =>
-    (status === "all" || item.status === status) &&
-    (threatTypeFilter === "all" || item.threat_type === threatTypeFilter) &&
-    (ipFilter === "" || (item.agent_name || "").includes(ipFilter) || JSON.stringify(item.summary || {}).includes(ipFilter)) &&
-    `${item.id} ${item.agent_name} ${item.threat_type}`.toLowerCase().includes(query.toLowerCase())
-  );
+function Incidents({ incidents, totalPages, page, onPageChange, onOpen, onRefresh, query, onQueryChange, statusFilter, onStatusFilter, threatTypeFilter, onThreatTypeFilter, ipFilter, onIpFilter }: { incidents: Incident[]; totalPages: number; page: number; onPageChange: (p: number) => void; onOpen: (i: Incident) => void; onRefresh: () => void; query: string; onQueryChange: (v: string) => void; statusFilter: string; onStatusFilter: (v: string) => void; threatTypeFilter: string; onThreatTypeFilter: (v: string) => void; ipFilter: string; onIpFilter: (v: string) => void }) {
   return (
     <section className="panel-block">
       <div className="section-head">
@@ -299,18 +289,18 @@ function Incidents({ incidents, totalPages, page, setPage, onOpen, onRefresh }: 
         <button className="ghost-action" onClick={onRefresh}><RefreshCw size={16} /> Обновить</button>
       </div>
       <div className="filters">
-        <label><Search size={16} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Поиск по агенту, угрозе, ID" /></label>
-        <label><Network size={16} /><input value={ipFilter} onChange={(e) => setIpFilter(e.target.value)} placeholder="Фильтр по IP" /></label>
-        <select value={threatTypeFilter} onChange={(e) => setThreatTypeFilter(e.target.value)}>
+        <label><Search size={16} /><input value={query} onChange={(e) => onQueryChange(e.target.value)} placeholder="Поиск по агенту, угрозе, ID" /></label>
+        <label><Network size={16} /><input value={ipFilter} onChange={(e) => onIpFilter(e.target.value)} placeholder="Фильтр по IP" /></label>
+        <select value={threatTypeFilter} onChange={(e) => onThreatTypeFilter(e.target.value)}>
           <option value="all">Все угрозы</option><option value="ddos">DDoS</option><option value="port_scan">Сканирование портов</option><option value="anomaly">Аномалия</option><option value="traffic">Трафик</option>
         </select>
-        <select value={status} onChange={(e) => setStatus(e.target.value)}>
+        <select value={statusFilter} onChange={(e) => onStatusFilter(e.target.value)}>
           <option value="all">Все статусы</option><option value="new">Новый</option><option value="investigating">Расследование</option><option value="resolved">Решён</option><option value="false_positive">Ложное срабатывание</option>
         </select>
       </div>
       <div className="incident-table">
         <div className="incident-row header"><span>Инцидент</span><span>Агент</span><span>Угроза</span><span>Критичность</span><span>ML</span><span>Статус</span></div>
-        {filtered.map((item) => (
+        {incidents.map((item) => (
           <button className="incident-row" key={item.id} onClick={() => onOpen(item)}>
             <code>{item.id.slice(0, 8)}</code><span>{item.agent_name || item.agent_id}</span><span>{threatLabel(item.threat_type)}</span>
             <span className={`chip ${severityClass(item.severity)}`}>{item.severity}</span><span>{item.ml_score.toFixed(2)}</span>
@@ -318,11 +308,16 @@ function Incidents({ incidents, totalPages, page, setPage, onOpen, onRefresh }: 
           </button>
         ))}
       </div>
-      {totalPages > 1 && (
+      {(incidents.length > 0 || totalPages > 1) && (
         <div style={{ display: "flex", justifyContent: "center", gap: 12, marginTop: 18 }}>
-          <button className="ghost-action" disabled={page <= 1} onClick={() => setPage(page - 1)}>← Назад</button>
-          <span style={{ color: "#7dd3fc", alignSelf: "center", fontSize: 13 }}>стр. {page} из {totalPages}</span>
-          <button className="ghost-action" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>Вперёд →</button>
+          {totalPages > 1 && (
+            <>
+              <button className="ghost-action" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>← Назад</button>
+              <span style={{ color: "#7dd3fc", alignSelf: "center", fontSize: 13 }}>стр. {page} из {totalPages}</span>
+              <button className="ghost-action" disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>Вперёд →</button>
+            </>
+          )}
+          {totalPages <= 1 && <span style={{ color: "#64748b", fontSize: 13 }}>Всего: {incidents.length} записей</span>}
         </div>
       )}
     </section>
@@ -438,14 +433,34 @@ export default function Home() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
 
+  // Filters state — managed here, passed to Incidents and used in loadData
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [threatTypeFilter, setThreatTypeFilter] = useState("all");
+  const [ipFilter, setIpFilter] = useState("");
+
   const criticalCount = useMemo(() => incidents.filter((i) => i.severity >= 4 && i.status !== "resolved").length, [incidents]);
+
+  const buildIncidentsUrl = useCallback(() => {
+    const params = new URLSearchParams();
+    params.set("page", String(page));
+    params.set("limit", "50");
+    params.set("sort_by", "created_at");
+    params.set("order", "desc");
+    params.set("period", period);
+    if (searchQuery) params.set("search", searchQuery);
+    if (statusFilter !== "all") params.set("status", statusFilter);
+    if (threatTypeFilter !== "all") params.set("threat_type", threatTypeFilter);
+    if (ipFilter) params.set("ip", ipFilter);
+    return `/api/incidents?${params.toString()}`;
+  }, [page, period, searchQuery, statusFilter, threatTypeFilter, ipFilter]);
 
   const loadData = useCallback(async () => {
     if (!token) return;
     try {
       const [statsData, incidentsData, agentsData] = await Promise.all([
         apiFetch<StatsResponse>(`/api/stats?period=${period}`, token),
-        apiFetch<{ items: Incident[]; pagination: { total_pages: number } }>(`/api/incidents?page=${page}&limit=50&sort_by=created_at&order=desc&period=${period}`, token),
+        apiFetch<{ items: Incident[]; pagination: { total_pages: number } }>(buildIncidentsUrl(), token),
         apiFetch<{ items: Agent[] }>("/api/agents", token),
       ]);
       setStats(statsData);
@@ -457,7 +472,7 @@ export default function Home() {
       console.error("Failed to load data", error);
       setDemoMode(true);
     }
-  }, [token, period, page]);
+  }, [token, period, buildIncidentsUrl]);
 
   // WebSocket — delta updates
   useEffect(() => {
@@ -548,7 +563,7 @@ export default function Home() {
           </div>
         </header>
         {section === "dashboard" && <Dashboard stats={stats} period={period} setPeriod={setPeriod} />}
-        {section === "incidents" && <Incidents incidents={incidents} totalPages={totalPages} page={page} setPage={setPage} onOpen={setSelectedIncident} onRefresh={loadData} />}
+        {section === "incidents" && <Incidents incidents={incidents} totalPages={totalPages} page={page} onPageChange={setPage} onOpen={setSelectedIncident} onRefresh={loadData} query={searchQuery} onQueryChange={(v) => { setSearchQuery(v); setPage(1); }} statusFilter={statusFilter} onStatusFilter={(v) => { setStatusFilter(v); setPage(1); }} threatTypeFilter={threatTypeFilter} onThreatTypeFilter={(v) => { setThreatTypeFilter(v); setPage(1); }} ipFilter={ipFilter} onIpFilter={(v) => { setIpFilter(v); setPage(1); }} />}
         {section === "agents" && <Agents token={token} agents={agents} onRefresh={loadData} />}
       </div>
       <IncidentInspector incident={selectedIncident} token={token} onClose={() => setSelectedIncident(null)} onUpdated={loadData} />

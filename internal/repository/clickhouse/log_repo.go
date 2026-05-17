@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/url"
 	"sync/atomic"
+	"time"
 
 	"github.com/google/uuid"
 	_ "github.com/ClickHouse/clickhouse-go/v2"
@@ -168,16 +169,18 @@ func (r *LogRepo) RawSample(ctx context.Context, agentID string, limit int) []ma
 	var out []map[string]any
 	for rows.Next() {
 		var (
-			timestamp                                     sql.NullTime
+			timestamp                                     time.Time
 			srcIP, dstIP, tcpFlags, srcMAC, dstMAC, ethType string
 			srcPort, dstPort, proto, ttl, length          uint16
 			icmpType, icmpCode                            *uint8
 			vlan                                          *uint16
 		)
 		if err := rows.Scan(&timestamp, &srcIP, &dstIP, &srcPort, &dstPort, &proto, &ttl, &length, &tcpFlags, &icmpType, &icmpCode, &srcMAC, &dstMAC, &vlan, &ethType); err != nil {
+			log.Printf("WARN: clickhouse RawSample row scan failed: %v", err)
 			continue
 		}
 		row := map[string]any{
+			"timestamp": timestamp.UTC().Format("2006-01-02T15:04:05.000Z"),
 			"src_ip":    srcIP,
 			"dst_ip":    dstIP,
 			"src_port":  srcPort,
@@ -189,9 +192,6 @@ func (r *LogRepo) RawSample(ctx context.Context, agentID string, limit int) []ma
 			"src_mac":   srcMAC,
 			"dst_mac":   dstMAC,
 			"eth_type":  ethType,
-		}
-		if timestamp.Valid {
-			row["timestamp"] = timestamp.Time.UTC().Format("2006-01-02T15:04:05.000Z")
 		}
 		if icmpType != nil {
 			row["icmp_type"] = *icmpType
