@@ -474,31 +474,26 @@ export default function Home() {
           if (msg.type === "new_incident") {
             const inc = msg.payload as { id: string; threat_type: string; log_count: number };
             toast.info(`Новый инцидент: ${threatLabel(inc.threat_type || "")} (${inc.log_count || 0} логов)`);
+            // KPI — мгновенный дельта-апдейт
+            setStats((prev) => ({
+              ...prev,
+              overview: {
+                ...prev.overview,
+                total_incidents: prev.overview.total_incidents + 1,
+                new_incidents: prev.overview.new_incidents + 1,
+                total_logs_processed: prev.overview.total_logs_processed + (inc.log_count || 0),
+              }
+            }));
+            // Графики + полный инцидент — подтягиваем с сервера
             apiFetch<Incident>(`/api/incidents/${inc.id}`, token)
               .then((fullIncident) => {
                 setIncidents((prev) => {
                   if (prev.some((i) => i.id === fullIncident.id)) return prev;
                   return [fullIncident, ...prev];
                 });
-                setStats((prev) => ({
-                  ...prev,
-                  overview: {
-                    ...prev.overview,
-                    total_incidents: prev.overview.total_incidents + 1,
-                    new_incidents: prev.overview.new_incidents + 1,
-                  }
-                }));
               })
-              .catch(() => {
-                setStats((prev) => ({
-                  ...prev,
-                  overview: {
-                    ...prev.overview,
-                    total_incidents: prev.overview.total_incidents + 1,
-                    new_incidents: prev.overview.new_incidents + 1,
-                  }
-                }));
-              });
+              .catch(() => {});
+            loadData();
           }
           if (msg.type === "incident_updated") {
             toast.info(`Статус инцидента обновлён: ${statusLabel(msg.payload?.status || "")}`);
