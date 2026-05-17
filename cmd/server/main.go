@@ -58,7 +58,7 @@ func main() {
 	// WebSocket-хаб для broadcast'а событий фронтенду
 	wsHub := handler.NewWsHub(logger)
 
-	ingest := service.NewLogIngestService(clickhouse, incidents, mlClient, notifications, wsHub, logger, cfg.ML.WindowSizeSeconds)
+	ingest := service.NewLogIngestService(clickhouse, incidents, mlClient, notifications, wsHub, logger, cfg.ML)
 
 	authH := handler.NewAuthHandler(authSvc)
 	agentH := handler.NewAgentHandler(agents, ingest)

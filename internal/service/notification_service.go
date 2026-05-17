@@ -34,7 +34,7 @@ func (s *NotificationService) SendTelegram(ctx context.Context, incident *domain
 	if incident.Severity < s.cfg.MinSeverity || incident.MLScore < s.cfg.MinScore {
 		return nil
 	}
-	msg := fmt.Sprintf("🚨 ОБНАРУЖЕНА АНОМАЛИЯ\n\nТип: %s\nСерьёзность: %d/5\nВремя: %s\nОценка ML: %.2f\n\nПодробности: %s", incident.ThreatType, incident.Severity, incident.CreatedAt.Format(time.RFC3339), incident.MLScore, "https://fluxmon.ru/")
+	msg := fmt.Sprintf("🚨 FluxMon: обнаружена аномалия\n\nТип: %s\nСерьёзность: %d/5\nВремя: %s\nОценка ML: %.2f\n\nПодробности: %s/incidents/%s", incident.ThreatType, incident.Severity, incident.CreatedAt.Format(time.RFC3339), incident.MLScore, s.cfg.BaseIncidentURL, incident.ID.String())
 	payload := map[string]any{
 		"chat_id": s.cfg.AdminChatID,
 		"text":    msg,

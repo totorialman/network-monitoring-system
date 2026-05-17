@@ -4,9 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"net/url"
 	"sync/atomic"
 
+	"github.com/google/uuid"
 	_ "github.com/ClickHouse/clickhouse-go/v2"
 	"network-monitor-backend/internal/config"
 	"network-monitor-backend/internal/domain"
@@ -129,6 +131,13 @@ func (r *LogRepo) RawSample(ctx context.Context, agentID string, limit int) []ma
 		limit = 1000
 	}
 
+	// Парсим agentID как UUID для корректного приведения типа в ClickHouse
+	agentUUID, err := uuid.Parse(agentID)
+	if err != nil {
+		log.Printf("ERROR: clickhouse RawSample invalid agent_id %q: %v", agentID, err)
+		return []map[string]any{}
+	}
+
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
 			timestamp,
@@ -150,9 +159,9 @@ func (r *LogRepo) RawSample(ctx context.Context, agentID string, limit int) []ma
 		WHERE agent_id = $1
 		ORDER BY timestamp DESC
 		LIMIT $2
-	`, agentID, limit)
+	`, agentUUID, limit)
 	if err != nil {
-		fmt.Printf("ERROR: clickhouse RawSample query failed: %v\n", err)
+		log.Printf("ERROR: clickhouse RawSample query failed for agent_id=%s: %v", agentID, err)
 		return []map[string]any{}
 	}
 	defer rows.Close()

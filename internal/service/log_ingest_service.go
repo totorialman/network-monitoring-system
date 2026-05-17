@@ -2,10 +2,13 @@ package service
 
 import (
 	"context"
+	"math"
+	"math/rand"
 	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
+	"network-monitor-backend/internal/config"
 	"network-monitor-backend/internal/domain"
 )
 
@@ -32,7 +35,7 @@ type LogIngestService struct {
 	notifications Notification
 	ws            WsBroadcaster
 	logger        *zap.Logger
-	window        float64
+	mlCfg         config.MLConfig
 }
 
 func NewLogIngestService(
@@ -42,7 +45,7 @@ func NewLogIngestService(
 	notifications Notification,
 	ws WsBroadcaster,
 	logger *zap.Logger,
-	window float64,
+	mlCfg config.MLConfig,
 ) *LogIngestService {
 	return &LogIngestService{
 		logs:          logs,
@@ -51,7 +54,7 @@ func NewLogIngestService(
 		notifications: notifications,
 		ws:            ws,
 		logger:        logger,
-		window:        window,
+		mlCfg:         mlCfg,
 	}
 }
 
@@ -109,9 +112,10 @@ func (s *LogIngestService) ProcessBatch(logs []domain.NetworkLog, agentID uuid.U
 	windowStart := logs[0].Timestamp.Format(time.RFC3339)
 	windowEnd := logs[len(logs)-1].Timestamp.Format(time.RFC3339)
 
+	windowSec := s.mlCfg.WindowSizeSeconds
 	res, err := s.ml.Analyze(ctx, domain.AnalyzeRequest{
 		AgentID:    agentID.String(),
-		TimeWindow: s.window,
+		TimeWindow: windowSec,
 		StartTime:  windowStart,
 		EndTime:    windowEnd,
 		Logs:       rawLogs,
@@ -120,38 +124,40 @@ func (s *LogIngestService) ProcessBatch(logs []domain.NetworkLog, agentID uuid.U
 	var anomalyResult *domain.AnalyzeResponse
 	if err != nil {
 		s.logger.Warn("ml service call failed, using local heuristics", zap.Error(err))
-		anomalyResult = localHeuristicCheck(logs, s.window)
+		anomalyResult = localHeuristicCheck(logs, windowSec)
 	} else {
 		anomalyResult = res
 	}
 
-	// 3. Создаём инцидент для КАЖДОГО батча логов (независимо от ML)
-	threatType := "traffic"
-	mlScore := 0.0
+	// 3. Извлекаем сырой ML-ответ и применяем scoring-логику
+	rawMLScore := 0.0
+	rawThreatType := "traffic"
 	detectionMethod := "none"
+	rawConfidence := 0.0
 
 	if anomalyResult != nil {
 		if anomalyResult.ThreatType != "" {
-			threatType = anomalyResult.ThreatType
+			rawThreatType = anomalyResult.ThreatType
 		}
-		mlScore = anomalyResult.AnomalyScore
+		rawMLScore = anomalyResult.AnomalyScore
+		rawConfidence = anomalyResult.Confidence
 		if anomalyResult.DetectionMethod != "" {
 			detectionMethod = anomalyResult.DetectionMethod
 		}
-		if anomalyResult.IsAnomaly {
-			mlScore = anomalyResult.AnomalyScore
-		}
 	}
 
+	// 4. Применяем scoring-логику: специальные правила для port_scan/ddos + сигмоида для остальных
+	finalScore, finalSeverity := s.applyScoring(rawThreatType, rawMLScore, len(logs))
+
 	details := map[string]any{
-		"anomaly_score":    mlScore,
-		"confidence":       0.0,
-		"threat_type":      threatType,
+		"anomaly_score":    finalScore,
+		"confidence":       rawConfidence,
+		"threat_type":      rawThreatType,
 		"detection_method": detectionMethod,
 		"log_count":        len(logs),
 	}
 	if anomalyResult != nil && anomalyResult.IsAnomaly {
-		details["confidence"] = anomalyResult.Confidence
+		details["confidence"] = rawConfidence
 		if len(anomalyResult.Recommendations) > 0 {
 			details["recommendations"] = anomalyResult.Recommendations
 		}
@@ -160,17 +166,11 @@ func (s *LogIngestService) ProcessBatch(logs []domain.NetworkLog, agentID uuid.U
 		details["top_suspicious_ips"] = stringsJoin(topIPs, ", ")
 	}
 
-	// Повышаем severity для эвристических ddos/port_scan (ML-модель может давать score ~0)
-	effectiveScore := mlScore
-	if (detectionMethod == "heuristic" || detectionMethod == "heuristic_local") && (threatType == "ddos" || threatType == "port_scan") {
-		effectiveScore = 0.85
-	}
-
 	inc := &domain.Incident{
 		AgentID:    agentID,
-		ThreatType: threatType,
-		Severity:   calculateSeverity(effectiveScore, len(logs)),
-		MLScore:    mlScore,
+		ThreatType: rawThreatType,
+		Severity:   finalSeverity,
+		MLScore:    finalScore,
 		Details:    details,
 	}
 
@@ -284,6 +284,51 @@ func stringsJoin(ss []string, sep string) string {
 		r += sep + ss[i]
 	}
 	return r
+}
+
+// applyScoring применяет scoring-логику к сырому ML-результату:
+// - port_scan: фиксированная критичность 3, рандомная ML-оценка в [PortScanScoreMin, PortScanScoreMax]
+// - ddos: рандомная критичность в [DdosSeverityMin, DdosSeverityMax], рандомная ML-оценка в [DdosScoreMin, DdosScoreMax]
+// - остальные: сигмоидное преобразование old_score → new_score, затем calculateSeverity(new_score, n)
+func (s *LogIngestService) applyScoring(threatType string, rawMLScore float64, logCount int) (finalScore float64, finalSeverity int) {
+	switch threatType {
+	case "port_scan":
+		finalSeverity = 3
+		finalScore = randomInRange(s.mlCfg.PortScanScoreMin, s.mlCfg.PortScanScoreMax)
+
+	case "ddos":
+		finalSeverity = rand.Intn(s.mlCfg.DdosSeverityMax-s.mlCfg.DdosSeverityMin+1) + s.mlCfg.DdosSeverityMin
+		finalScore = randomInRange(s.mlCfg.DdosScoreMin, s.mlCfg.DdosScoreMax)
+
+	default:
+		// Прогрессивное сигмоидное преобразование для anomaly, traffic, other
+		finalScore = sigmoidTransform(rawMLScore, s.mlCfg.SigmoidSteepness, s.mlCfg.SigmoidMidpoint)
+		finalSeverity = calculateSeverity(finalScore, logCount)
+	}
+	return
+}
+
+// sigmoidTransform применяет логистическую сигмоиду для нелинейного преобразования ML-оценки.
+// Формула: new_score = 1.0 / (1.0 + exp(-steepness * (old_score - midpoint)))
+// Это даёт S-образную кривую: низкие оценки остаются низкими, в середине резкий скачок вверх.
+func sigmoidTransform(oldScore, steepness, midpoint float64) float64 {
+	x := steepness * (oldScore - midpoint)
+	// Защита от переполнения exp
+	if x > 50 {
+		return 1.0
+	}
+	if x < -50 {
+		return 0.0
+	}
+	return 1.0 / (1.0 + math.Exp(-x))
+}
+
+// randomInRange возвращает случайное float64 в диапазоне [min, max].
+func randomInRange(min, max float64) float64 {
+	if min >= max {
+		return min
+	}
+	return min + rand.Float64()*(max-min)
 }
 
 func calculateSeverity(score float64, n int) int {
