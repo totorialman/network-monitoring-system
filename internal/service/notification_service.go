@@ -34,7 +34,7 @@ func (s *NotificationService) SendTelegram(ctx context.Context, incident *domain
 	if incident.Severity < s.cfg.MinSeverity && incident.MLScore < s.cfg.MinScore {
 		return nil
 	}
-	msg := fmt.Sprintf("🚨 ОБНАРУЖЕНА АНОМАЛИЯ!\n\nТип: %s\nСерьёзность: %d/5\nВремя: %s\nОценка ML: %.2f\n\nПодробности: %s", incident.ThreatType, incident.Severity, incident.CreatedAt.Format(time.RFC3339), incident.MLScore, s.cfg.BaseIncidentURL)
+	msg := fmt.Sprintf("🚨 FluxMon: обнаружена аномалия\n\nТип: %s\nСерьёзность: %d/5\nВремя: %s (МСК)\nОценка ML: %.2f\n\nПодробности: %s", incident.ThreatType, incident.Severity, incident.CreatedAt.Format("02.01.2006 15:04:05"), incident.MLScore, s.cfg.BaseIncidentURL)
 	payload := map[string]any{
 		"chat_id": s.cfg.AdminChatID,
 		"text":    msg,
@@ -42,7 +42,7 @@ func (s *NotificationService) SendTelegram(ctx context.Context, incident *domain
 			"inline_keyboard": [][]map[string]string{
 				{
 					{"text": "🟡 В работу", "callback_data": "investigating:" + incident.ID.String()},
-					{"text": "🟢 Решено", "callback_data": "resolved:" + incident.ID.String()},
+					{"text": "🟢 Решён", "callback_data": "resolved:" + incident.ID.String()},
 				},
 				{
 					{"text": "⚪ Ложное срабатывание", "callback_data": "false_positive:" + incident.ID.String()},

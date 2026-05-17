@@ -131,7 +131,7 @@ function statusClass(status: string) {
 
 function statusLabel(status: string): string {
   const map: Record<string, string> = {
-    new: "Новый", investigating: "Расследование", resolved: "Решён", false_positive: "Ложное срабатывание",
+    new: "Новый", investigating: "В работу", resolved: "Решён", false_positive: "Ложное срабатывание",
   };
   return map[status] || status;
 }
@@ -283,7 +283,7 @@ function Incidents({ incidents, totalPages, page, setPage, onOpen, onRefresh }: 
   const filtered = incidents.filter((item) =>
     (status === "all" || item.status === status) &&
     (threatTypeFilter === "all" || item.threat_type === threatTypeFilter) &&
-    (ipFilter === "" || (item.agent_id || "").includes(ipFilter) || (item.agent_name || "").includes(ipFilter)) &&
+    (ipFilter === "" || (item.agent_name || "").includes(ipFilter) || JSON.stringify(item.summary || {}).includes(ipFilter)) &&
     `${item.id} ${item.agent_name} ${item.threat_type}`.toLowerCase().includes(query.toLowerCase())
   );
   return (
@@ -299,7 +299,7 @@ function Incidents({ incidents, totalPages, page, setPage, onOpen, onRefresh }: 
           <option value="all">Все угрозы</option><option value="ddos">DDoS</option><option value="port_scan">Сканирование портов</option><option value="anomaly">Аномалия</option><option value="traffic">Трафик</option>
         </select>
         <select value={status} onChange={(e) => setStatus(e.target.value)}>
-          <option value="all">Все статусы</option><option value="new">Новый</option><option value="investigating">Расследование</option><option value="resolved">Решён</option><option value="false_positive">Ложное срабатывание</option>
+          <option value="all">Все статусы</option><option value="new">Новый</option><option value="investigating">В работу</option><option value="resolved">Решён</option><option value="false_positive">Ложное срабатывание</option>
         </select>
       </div>
       <div className="incident-table">
@@ -407,7 +407,7 @@ function IncidentInspector({ incident, token, onClose, onUpdated }: { incident: 
         {logsLoading ? <p className="muted">Загрузка...</p> : <pre>{JSON.stringify(rawLogs || [], null, 2)}</pre>}
         <form onSubmit={updateStatus} className="status-form">
           <select value={status} onChange={(e) => setStatus(e.target.value)}>
-            <option value="new">Новый</option><option value="investigating">Расследование</option><option value="resolved">Решён</option><option value="false_positive">Ложное срабатывание</option>
+            <option value="new">Новый</option><option value="investigating">В работу</option><option value="resolved">Решён</option><option value="false_positive">Ложное срабатывание</option>
           </select>
           <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Комментарий расследования" />
           <button className="primary-action"><CheckCircle2 size={16} /> Обновить статус</button>
