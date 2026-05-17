@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"math"
 	"math/rand"
 	"time"
@@ -146,8 +148,11 @@ func (s *LogIngestService) ProcessBatch(logs []domain.NetworkLog, agentID uuid.U
 		}
 	}
 
-	// 4. Применяем scoring-логику: специальные правила для port_scan/ddos + сигмоида для остальных
-	finalScore, finalSeverity := s.applyScoring(rawThreatType, rawMLScore, len(logs))
+	// 4. Вычисляем детерминированный seed из содержимого логов (хеш JSON)
+	logSeed := hashLogs(logs)
+
+	// 5. Применяем scoring-логику: специальные правила для port_scan/ddos + сигмоида для остальных
+	finalScore, finalSeverity := s.applyScoring(rawThreatType, rawMLScore, len(logs), logSeed)
 
 	details := map[string]any{
 		"anomaly_score":    finalScore,
@@ -286,19 +291,37 @@ func stringsJoin(ss []string, sep string) string {
 	return r
 }
 
+// hashLogs вычисляет детерминированный seed на основе SHA-256 содержимого логов.
+// Одинаковые логи → одинаковый хеш → одинаковые «рандомные» значения.
+func hashLogs(logs []domain.NetworkLog) int64 {
+	b, err := json.Marshal(logs)
+	if err != nil {
+		return int64(len(logs)) // fallback
+	}
+	h := sha256.Sum256(b)
+	// Берём первые 8 байт как int64
+	var seed int64
+	for i := 0; i < 8; i++ {
+		seed = seed<<8 | int64(h[i])
+	}
+	return seed
+}
+
 // applyScoring применяет scoring-логику к сырому ML-результату:
 // - port_scan: фиксированная критичность 3, рандомная ML-оценка в [PortScanScoreMin, PortScanScoreMax]
 // - ddos: рандомная критичность в [DdosSeverityMin, DdosSeverityMax], рандомная ML-оценка в [DdosScoreMin, DdosScoreMax]
 // - остальные: сигмоидное преобразование old_score → new_score, затем calculateSeverity(new_score, n)
-func (s *LogIngestService) applyScoring(threatType string, rawMLScore float64, logCount int) (finalScore float64, finalSeverity int) {
+// seed обеспечивает детерминизм: одинаковые логи → одинаковые оценки.
+func (s *LogIngestService) applyScoring(threatType string, rawMLScore float64, logCount int, seed int64) (finalScore float64, finalSeverity int) {
+	rng := rand.New(rand.NewSource(seed))
 	switch threatType {
 	case "port_scan":
 		finalSeverity = 3
-		finalScore = randomInRange(s.mlCfg.PortScanScoreMin, s.mlCfg.PortScanScoreMax)
+		finalScore = randomInRange(rng, s.mlCfg.PortScanScoreMin, s.mlCfg.PortScanScoreMax)
 
 	case "ddos":
-		finalSeverity = rand.Intn(s.mlCfg.DdosSeverityMax-s.mlCfg.DdosSeverityMin+1) + s.mlCfg.DdosSeverityMin
-		finalScore = randomInRange(s.mlCfg.DdosScoreMin, s.mlCfg.DdosScoreMax)
+		finalSeverity = rng.Intn(s.mlCfg.DdosSeverityMax-s.mlCfg.DdosSeverityMin+1) + s.mlCfg.DdosSeverityMin
+		finalScore = randomInRange(rng, s.mlCfg.DdosScoreMin, s.mlCfg.DdosScoreMax)
 
 	default:
 		// Прогрессивное сигмоидное преобразование для anomaly, traffic, other
@@ -323,12 +346,12 @@ func sigmoidTransform(oldScore, steepness, midpoint float64) float64 {
 	return 1.0 / (1.0 + math.Exp(-x))
 }
 
-// randomInRange возвращает случайное float64 в диапазоне [min, max].
-func randomInRange(min, max float64) float64 {
+// randomInRange возвращает случайное float64 в диапазоне [min, max] с использованием переданного RNG.
+func randomInRange(rng *rand.Rand, min, max float64) float64 {
 	if min >= max {
 		return min
 	}
-	return min + rand.Float64()*(max-min)
+	return min + rng.Float64()*(max-min)
 }
 
 func calculateSeverity(score float64, n int) int {
