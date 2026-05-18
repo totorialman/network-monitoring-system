@@ -111,16 +111,34 @@ func (r *LogRepo) BatchInsert(ctx context.Context, logs []domain.NetworkLog) err
 
 // Count возвращает актуальное количество сырых логов в ClickHouse.
 // При первом вызове или после перезапуска синхронизируется с ClickHouse.
-// CountSince возвращает количество сырых логов в ClickHouse за указанный период.
-func (r *LogRepo) CountSince(ctx context.Context, since time.Time) int64 {
+// CountPeriod возвращает количество сырых логов в ClickHouse за указанный период.
+// period: "1h", "6h", "24h", "7d", "30d"
+func (r *LogRepo) CountPeriod(ctx context.Context, period string) int64 {
 	var n int64
-	query := fmt.Sprintf("SELECT count() FROM network_logs WHERE timestamp > toDateTime(%d)", since.Unix())
+	query := fmt.Sprintf("SELECT count() FROM network_logs WHERE timestamp > now() - INTERVAL %s HOUR", periodToHours(period))
 	err := r.db.QueryRowContext(ctx, query).Scan(&n)
 	if err != nil {
-		log.Printf("WARN: clickhouse CountSince failed: %v", err)
+		log.Printf("WARN: clickhouse CountPeriod failed: %v", err)
 		return 0
 	}
 	return n
+}
+
+func periodToHours(period string) string {
+	switch period {
+	case "1h":
+		return "1"
+	case "6h":
+		return "6"
+	case "24h":
+		return "24"
+	case "7d":
+		return fmt.Sprintf("%d", 7*24)
+	case "30d":
+		return fmt.Sprintf("%d", 30*24)
+	default:
+		return "24"
+	}
 }
 
 // Count возвращает актуальное количество сырых логов в ClickHouse.

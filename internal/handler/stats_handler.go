@@ -15,7 +15,7 @@ import (
 // Count — для дашборда, RawSample — для «разворачивания» сырых логов инцидента.
 type LogQuerier interface {
 	Count(context.Context) int64
-	CountSince(ctx context.Context, since time.Time) int64
+	CountPeriod(ctx context.Context, period string) int64
 	RawSample(ctx context.Context, agentID string, limit int) []map[string]any
 }
 
@@ -46,8 +46,7 @@ func (h *StatsHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	// Получаем top_sources из БД
 	topSources := h.incidents.TopSources(ctx, period)
 
-	since := periodToTime(period)
-	logCount := h.logs.CountSince(ctx, since)
+	logCount := h.logs.CountPeriod(ctx, period)
 	overview := map[string]any{
 		"total_incidents":      st["total_incidents"],
 		"new_incidents":        st["new_incidents"],
