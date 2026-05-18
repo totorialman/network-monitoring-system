@@ -114,7 +114,7 @@ func (r *LogRepo) BatchInsert(ctx context.Context, logs []domain.NetworkLog) err
 // CountSince возвращает количество сырых логов в ClickHouse за указанный период.
 func (r *LogRepo) CountSince(ctx context.Context, since time.Time) int64 {
 	var n int64
-	err := r.db.QueryRowContext(ctx, `SELECT count() FROM network_logs WHERE timestamp > ?`, since.UTC().Format("2006-01-02 15:04:05")).Scan(&n)
+	err := r.db.QueryRowContext(ctx, `SELECT count() FROM network_logs WHERE timestamp > ?`, since).Scan(&n)
 	if err != nil {
 		log.Printf("WARN: clickhouse CountSince failed: %v", err)
 		return 0
