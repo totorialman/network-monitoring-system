@@ -336,7 +336,12 @@ func (s *LogIngestService) applyScoring(threatType string, rawMLScore float64, l
 	default:
 		// Прогрессивное сигмоидное преобразование для anomaly, traffic, other
 		finalScore = sigmoidTransform(rawMLScore, s.mlCfg.SigmoidSteepness, s.mlCfg.SigmoidMidpoint)
-		finalSeverity = calculateSeverity(finalScore, logCount)
+		if finalScore < 0.15 {
+			finalScore = 0.0
+			finalSeverity = 1
+		} else {
+			finalSeverity = calculateSeverity(finalScore, logCount)
+		}
 	}
 	return
 }
