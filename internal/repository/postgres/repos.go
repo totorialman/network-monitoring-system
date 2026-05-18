@@ -163,15 +163,16 @@ func (r *IncidentRepo) Stats(ctx context.Context, period string) (map[string]any
 	interval := periodToInterval(period)
 	res := map[string]any{}
 
-	var totalInc, newInc, avgML float64
+	var totalInc, newInc, criticalCnt, avgML float64
 	err := r.db.QueryRowContext(ctx,
-		fmt.Sprintf(`SELECT COUNT(*), COUNT(*) FILTER (WHERE status='new'), COALESCE(AVG(ml_score),0) FROM incidents WHERE created_at > NOW() - INTERVAL '%s'`, interval),
-	).Scan(&totalInc, &newInc, &avgML)
+		fmt.Sprintf(`SELECT COUNT(*), COUNT(*) FILTER (WHERE status='new'), COUNT(*) FILTER (WHERE severity >= 4 AND status NOT IN ('resolved','false_positive')), COALESCE(AVG(ml_score),0) FROM incidents WHERE created_at > NOW() - INTERVAL '%s'`, interval),
+	).Scan(&totalInc, &newInc, &criticalCnt, &avgML)
 	if err != nil {
 		return nil, err
 	}
 	res["total_incidents"] = totalInc
 	res["new_incidents"] = newInc
+	res["critical_count"] = criticalCnt
 	res["avg_ml_score"] = avgML
 
 	var active int64

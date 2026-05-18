@@ -37,6 +37,7 @@ const WS_BASE_URL = (() => {
 type Overview = {
   total_incidents: number;
   new_incidents: number;
+  critical_count: number;
   active_agents: number;
   total_logs_processed: number;
   avg_ml_score: number;
@@ -80,7 +81,7 @@ type Agent = {
 };
 
 const demoStats: StatsResponse = {
-  overview: { total_incidents: 0, new_incidents: 0, active_agents: 0, total_logs_processed: 0, avg_ml_score: 0 },
+  overview: { total_incidents: 0, new_incidents: 0, critical_count: 0, active_agents: 0, total_logs_processed: 0, avg_ml_score: 0 },
   timeseries: [],
   threat_distribution: {},
   top_sources: [],
@@ -265,7 +266,7 @@ function Dashboard({ stats, period, setPeriod }: { stats: StatsResponse; period:
         <h3>Основные источники</h3>
         {(stats.top_sources || []).length > 0 ? (
           <ResponsiveContainer width="100%" height={350}>
-            <BarChart layout="vertical" data={stats.top_sources || []}>
+            <BarChart layout="vertical" data={stats.top_sources || []} barSize={20}>
               <CartesianGrid stroke="#1e3a4a" strokeDasharray="3 3" />
               <XAxis type="number" stroke="#64748b" />
               <YAxis type="category" dataKey="ip" stroke="#7dd3fc" width={170} tick={{ fontSize: 12 }} />
@@ -439,7 +440,6 @@ export default function Home() {
   const [threatTypeFilter, setThreatTypeFilter] = useState("all");
   const [ipFilter, setIpFilter] = useState("");
 
-  const criticalCount = useMemo(() => incidents.filter((i) => i.severity >= 4 && i.status !== "resolved" && i.status !== "false_positive").length, [incidents]);
 
   const buildIncidentsUrl = useCallback(() => {
     const params = new URLSearchParams();
@@ -559,7 +559,7 @@ export default function Home() {
           <div><p className="eyebrow">МОНИТОРИНГ СЕТЕВОГО ТРАФИКА</p><h1>{topbarTitle}</h1></div>
           <div className="topbar-actions">
             {demoMode && <span className="chip text-amber-100 bg-amber-500/20 border-amber-400/30">демо-режим</span>}
-            <span className="critical-chip"><AlertTriangle size={15} /> {criticalCount} критических/открытых</span>
+            <span className="critical-chip"><AlertTriangle size={15} /> {stats.overview.critical_count} критических</span>
             <span className="user-pill"><UserRound size={15} /> admin</span>
           </div>
         </header>

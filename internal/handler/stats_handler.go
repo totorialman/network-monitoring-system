@@ -47,6 +47,7 @@ func (h *StatsHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	overview := map[string]any{
 		"total_incidents":      st["total_incidents"],
 		"new_incidents":        st["new_incidents"],
+		"critical_count":       st["critical_count"],
 		"active_agents":         st["active_agents"],
 		"total_logs_processed":  h.logs.Count(ctx),
 		"avg_ml_score":         st["avg_ml_score"],
