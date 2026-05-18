@@ -35,16 +35,16 @@ func (s *NotificationService) SendTelegram(ctx context.Context, incident *domain
 		return nil
 	}
 	// Иконка по типу угрозы
-	icon := "🟠"
+	icon := "🚨"
 	switch incident.ThreatType {
 	case "ddos":
-		icon = "🔴"
+		icon = "🚨"
 	case "port_scan":
-		icon = "🟡"
+		icon = "🚨"
 	case "anomaly":
-		icon = "🟠"
+		icon = "🚨"
 	default:
-		icon = "🔵"
+		icon = "🚨"
 	}
 	// Severity-индикатор: визуальная шкала
 	severityBar := ""
@@ -60,7 +60,7 @@ func (s *NotificationService) SendTelegram(ctx context.Context, incident *domain
 		incident.ThreatType,
 		severityBar, incident.Severity,
 		incident.MLScore,
-		incident.CreatedAt.Format("02.01.2006 15:04:05"),
+		incident.CreatedAt.In(time.FixedZone("MSK", 3*60*60)).Format("02.01.2006 15:04:05"),
 		incident.ID.String(),
 		"https://fluxmon.ru/",
 	)

@@ -132,7 +132,7 @@ function statusClass(status: string) {
 
 function statusLabel(status: string): string {
   const map: Record<string, string> = {
-    new: "Новый", investigating: "Расследование", resolved: "Решён", false_positive: "Ложное срабатывание",
+    new: "Новый", investigating: "В работу", resolved: "Решён", false_positive: "Ложное срабатывание",
   };
   return map[status] || status;
 }
@@ -295,7 +295,7 @@ function Incidents({ incidents, totalPages, page, onPageChange, onOpen, onRefres
           <option value="all">Все угрозы</option><option value="ddos">DDoS</option><option value="port_scan">Сканирование портов</option><option value="anomaly">Аномалия</option><option value="traffic">Трафик</option>
         </select>
         <select value={statusFilter} onChange={(e) => onStatusFilter(e.target.value)}>
-          <option value="all">Все статусы</option><option value="new">Новый</option><option value="investigating">Расследование</option><option value="resolved">Решён</option><option value="false_positive">Ложное срабатывание</option>
+          <option value="all">Все статусы</option><option value="new">Новый</option><option value="investigating">В работу</option><option value="resolved">Решён</option><option value="false_positive">Ложное срабатывание</option>
         </select>
       </div>
       <div className="incident-table">
@@ -409,9 +409,9 @@ function IncidentInspector({ incident, token, onClose, onUpdated }: { incident: 
         {logsLoading ? <p className="muted">Загрузка...</p> : <pre>{JSON.stringify(rawLogs || [], null, 2)}</pre>}
         <form onSubmit={updateStatus} className="status-form">
           <select value={status} onChange={(e) => setStatus(e.target.value)}>
-            <option value="new">Новый</option><option value="investigating">Расследование</option><option value="resolved">Решён</option><option value="false_positive">Ложное срабатывание</option>
+            <option value="new">Новый</option><option value="investigating">В работу</option><option value="resolved">Решён</option><option value="false_positive">Ложное срабатывание</option>
           </select>
-          <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Комментарий расследования" />
+          <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Комментарий" />
           <button className="primary-action"><CheckCircle2 size={16} /> Обновить статус</button>
         </form>
       </div>

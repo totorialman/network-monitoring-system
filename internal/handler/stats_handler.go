@@ -46,13 +46,8 @@ func (h *StatsHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	// Получаем top_sources из БД
 	topSources := h.incidents.TopSources(ctx, period)
 
-	logCount := h.logs.Count(ctx)
-	if period != "" {
-		since := periodToTime(period)
-		if cnt := h.logs.CountSince(ctx, since); cnt > 0 {
-			logCount = cnt
-		}
-	}
+	since := periodToTime(period)
+	logCount := h.logs.CountSince(ctx, since)
 	overview := map[string]any{
 		"total_incidents":      st["total_incidents"],
 		"new_incidents":        st["new_incidents"],
@@ -96,18 +91,19 @@ func (h *StatsHandler) AgentLogs(w http.ResponseWriter, r *http.Request) {
 var _ = strconv.Itoa
 
 func periodToTime(period string) time.Time {
+	now := time.Now().UTC()
 	switch period {
 	case "1h":
-		return time.Now().Add(-1 * time.Hour)
+		return now.Add(-1 * time.Hour)
 	case "6h":
-		return time.Now().Add(-6 * time.Hour)
+		return now.Add(-6 * time.Hour)
 	case "24h":
-		return time.Now().Add(-24 * time.Hour)
+		return now.Add(-24 * time.Hour)
 	case "7d":
-		return time.Now().Add(-7 * 24 * time.Hour)
+		return now.Add(-7 * 24 * time.Hour)
 	case "30d":
-		return time.Now().Add(-30 * 24 * time.Hour)
+		return now.Add(-30 * 24 * time.Hour)
 	default:
-		return time.Now().Add(-24 * time.Hour)
+		return now.Add(-24 * time.Hour)
 	}
 }
