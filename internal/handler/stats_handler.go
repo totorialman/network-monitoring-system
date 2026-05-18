@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/gorilla/mux"
 	"network-monitor-backend/internal/httpx"
@@ -15,7 +14,6 @@ import (
 // Count — для дашборда, RawSample — для «разворачивания» сырых логов инцидента.
 type LogQuerier interface {
 	Count(context.Context) int64
-	CountPeriod(ctx context.Context, period string) int64
 	RawSample(ctx context.Context, agentID string, limit int) []map[string]any
 }
 
@@ -46,7 +44,7 @@ func (h *StatsHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	// Получаем top_sources из БД
 	topSources := h.incidents.TopSources(ctx, period)
 
-	logCount := h.logs.CountPeriod(ctx, period)
+	logCount := h.logs.Count(ctx)
 	overview := map[string]any{
 		"total_incidents":      st["total_incidents"],
 		"new_incidents":        st["new_incidents"],
@@ -88,21 +86,3 @@ func (h *StatsHandler) AgentLogs(w http.ResponseWriter, r *http.Request) {
 }
 
 var _ = strconv.Itoa
-
-func periodToTime(period string) time.Time {
-	now := time.Now().UTC()
-	switch period {
-	case "1h":
-		return now.Add(-1 * time.Hour)
-	case "6h":
-		return now.Add(-6 * time.Hour)
-	case "24h":
-		return now.Add(-24 * time.Hour)
-	case "7d":
-		return now.Add(-7 * 24 * time.Hour)
-	case "30d":
-		return now.Add(-30 * 24 * time.Hour)
-	default:
-		return now.Add(-24 * time.Hour)
-	}
-}
