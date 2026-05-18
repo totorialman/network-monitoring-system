@@ -266,7 +266,7 @@ function Dashboard({ stats, period, setPeriod }: { stats: StatsResponse; period:
         <h3>Основные источники</h3>
         {(stats.top_sources || []).length > 0 ? (
           <ResponsiveContainer width="100%" height={350}>
-            <BarChart layout="vertical" data={stats.top_sources || []} barSize={20}>
+            <BarChart layout="vertical" data={stats.top_sources || []} barSize={Math.max(12, Math.min(30, 280 / Math.max(1, (stats.top_sources || []).length)))}>
               <CartesianGrid stroke="#1e3a4a" strokeDasharray="3 3" />
               <XAxis type="number" stroke="#64748b" />
               <YAxis type="category" dataKey="ip" stroke="#7dd3fc" width={170} tick={{ fontSize: 12 }} />
@@ -282,7 +282,7 @@ function Dashboard({ stats, period, setPeriod }: { stats: StatsResponse; period:
   );
 }
 
-function Incidents({ incidents, totalPages, page, onPageChange, onOpen, onRefresh, query, onQueryChange, statusFilter, onStatusFilter, threatTypeFilter, onThreatTypeFilter, ipFilter, onIpFilter }: { incidents: Incident[]; totalPages: number; page: number; onPageChange: (p: number) => void; onOpen: (i: Incident) => void; onRefresh: () => void; query: string; onQueryChange: (v: string) => void; statusFilter: string; onStatusFilter: (v: string) => void; threatTypeFilter: string; onThreatTypeFilter: (v: string) => void; ipFilter: string; onIpFilter: (v: string) => void }) {
+function Incidents({ incidents, totalPages, page, onPageChange, onOpen, onRefresh, query, onQueryChange, statusFilter, onStatusFilter, threatTypeFilter, onThreatTypeFilter }: { incidents: Incident[]; totalPages: number; page: number; onPageChange: (p: number) => void; onOpen: (i: Incident) => void; onRefresh: () => void; query: string; onQueryChange: (v: string) => void; statusFilter: string; onStatusFilter: (v: string) => void; threatTypeFilter: string; onThreatTypeFilter: (v: string) => void }) {
   return (
     <section className="panel-block">
       <div className="section-head">
@@ -290,8 +290,7 @@ function Incidents({ incidents, totalPages, page, onPageChange, onOpen, onRefres
         <button className="ghost-action" onClick={onRefresh}><RefreshCw size={16} /> Обновить</button>
       </div>
       <div className="filters">
-        <label><Search size={16} /><input value={query} onChange={(e) => onQueryChange(e.target.value)} placeholder="Поиск по агенту, угрозе, ID" /></label>
-        <label><Network size={16} /><input value={ipFilter} onChange={(e) => onIpFilter(e.target.value)} placeholder="Фильтр по IP" /></label>
+        <label><Search size={16} /><input value={query} onChange={(e) => onQueryChange(e.target.value)} placeholder="Поиск по ID, агенту, угрозе, IP" /></label>
         <select value={threatTypeFilter} onChange={(e) => onThreatTypeFilter(e.target.value)}>
           <option value="all">Все угрозы</option><option value="ddos">DDoS</option><option value="port_scan">Сканирование портов</option><option value="anomaly">Аномалия</option><option value="traffic">Трафик</option>
         </select>
@@ -438,8 +437,6 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [threatTypeFilter, setThreatTypeFilter] = useState("all");
-  const [ipFilter, setIpFilter] = useState("");
-
 
   const buildIncidentsUrl = useCallback(() => {
     const params = new URLSearchParams();
@@ -448,13 +445,11 @@ export default function Home() {
     params.set("sort_by", "created_at");
     params.set("order", "desc");
     params.set("period", period);
-    // Объединяем searchQuery и ipFilter в один search-параметр
-    const combinedSearch = [searchQuery, ipFilter].filter(Boolean).join(" ");
-    if (combinedSearch) params.set("search", combinedSearch);
+    if (searchQuery) params.set("search", searchQuery);
     if (statusFilter !== "all") params.set("status", statusFilter);
     if (threatTypeFilter !== "all") params.set("threat_type", threatTypeFilter);
     return `/api/incidents?${params.toString()}`;
-  }, [page, period, searchQuery, statusFilter, threatTypeFilter, ipFilter]);
+  }, [page, period, searchQuery, statusFilter, threatTypeFilter]);
 
   const loadData = useCallback(async () => {
     if (!token) return;
@@ -490,25 +485,6 @@ export default function Home() {
           if (msg.type === "new_incident") {
             const inc = msg.payload as { id: string; threat_type: string; log_count: number };
             toast.info(`Новый инцидент: ${threatLabel(inc.threat_type || "")} (${inc.log_count || 0} логов)`);
-            // KPI — мгновенный дельта-апдейт
-            setStats((prev) => ({
-              ...prev,
-              overview: {
-                ...prev.overview,
-                total_incidents: prev.overview.total_incidents + 1,
-                new_incidents: prev.overview.new_incidents + 1,
-                total_logs_processed: prev.overview.total_logs_processed + (inc.log_count || 0),
-              }
-            }));
-            // Графики + полный инцидент — подтягиваем с сервера
-            apiFetch<Incident>(`/api/incidents/${inc.id}`, token)
-              .then((fullIncident) => {
-                setIncidents((prev) => {
-                  if (prev.some((i) => i.id === fullIncident.id)) return prev;
-                  return [fullIncident, ...prev];
-                });
-              })
-              .catch(() => {});
             loadData();
           }
           if (msg.type === "incident_updated") {
@@ -549,7 +525,7 @@ export default function Home() {
     <main className="app-shell" style={{ backgroundImage: `linear-gradient(rgba(5,10,18,.92), rgba(5,10,18,.96)), url(${GRID_IMAGE})` }}>
       <nav className="side-rail">
         <div className="brand-mark"><ShieldAlert size={22} /><span>FluxMon</span></div>
-        <button className={section === "dashboard" ? "active" : ""} onClick={() => navTo("dashboard")}><BarChart3 /> <span className="nav-label">Дашборд</span></button>
+        <button className={section === "dashboard" ? "active" : ""} onClick={() => navTo("dashboard")}><BarChart3 /> <span className="nav-label">Статистика</span></button>
         <button className={section === "incidents" ? "active" : ""} onClick={() => navTo("incidents")}><ShieldAlert /> <span className="nav-label">Инциденты</span></button>
         <button className={section === "agents" ? "active" : ""} onClick={() => navTo("agents")}><RadioTower /> <span className="nav-label">Агенты</span></button>
         <button className="logout" onClick={() => { localStorage.removeItem("nm_jwt"); setToken(""); }}><LogOut /> <span className="nav-label">Выход</span></button>
@@ -564,7 +540,7 @@ export default function Home() {
           </div>
         </header>
         {section === "dashboard" && <Dashboard stats={stats} period={period} setPeriod={setPeriod} />}
-        {section === "incidents" && <Incidents incidents={incidents} totalPages={totalPages} page={page} onPageChange={setPage} onOpen={setSelectedIncident} onRefresh={loadData} query={searchQuery} onQueryChange={(v) => { setSearchQuery(v); setPage(1); }} statusFilter={statusFilter} onStatusFilter={(v) => { setStatusFilter(v); setPage(1); }} threatTypeFilter={threatTypeFilter} onThreatTypeFilter={(v) => { setThreatTypeFilter(v); setPage(1); }} ipFilter={ipFilter} onIpFilter={(v) => { setIpFilter(v); setPage(1); }} />}
+        {section === "incidents" && <Incidents incidents={incidents} totalPages={totalPages} page={page} onPageChange={setPage} onOpen={setSelectedIncident} onRefresh={loadData} query={searchQuery} onQueryChange={(v) => { setSearchQuery(v); setPage(1); }} statusFilter={statusFilter} onStatusFilter={(v) => { setStatusFilter(v); setPage(1); }} threatTypeFilter={threatTypeFilter} onThreatTypeFilter={(v) => { setThreatTypeFilter(v); setPage(1); }} />}
         {section === "agents" && <Agents token={token} agents={agents} onRefresh={loadData} />}
       </div>
       <IncidentInspector incident={selectedIncident} token={token} onClose={() => setSelectedIncident(null)} onUpdated={loadData} />

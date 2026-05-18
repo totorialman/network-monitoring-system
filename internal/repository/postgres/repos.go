@@ -314,7 +314,7 @@ func buildIncidentWhere(f IncidentFilters) (string, []any) {
 		parts = append(parts, fmt.Sprintf("i.created_at > NOW() - INTERVAL '%s'", periodToInterval(f.Period)))
 	}
 	if f.Search != "" {
-		add("(i.id::text ILIKE '%' || $%d || '%' OR COALESCE(a.name,'') ILIKE '%' || $%d || '%' OR i.threat_type ILIKE '%' || $%d || '%' OR COALESCE(i.details->>'top_suspicious_ips','') ILIKE '%' || $%d || '%')", "%"+f.Search+"%")
+		add("(i.id::text ILIKE '%' || $%[1]d || '%' OR COALESCE(a.name,'') ILIKE '%' || $%[1]d || '%' OR i.threat_type ILIKE '%' || $%[1]d || '%' OR COALESCE(i.details->>'top_suspicious_ips','') ILIKE '%' || $%[1]d || '%')", "%"+f.Search+"%")
 	}
 	if len(parts) == 0 {
 		return "", args
