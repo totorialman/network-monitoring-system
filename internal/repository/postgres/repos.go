@@ -77,8 +77,7 @@ type IncidentFilters struct {
 	Status, ThreatType, AgentID, From, To, SortBy, Order string
 	SeverityMin, SeverityMax                             int
 	Period                                               string // 1h, 6h, 24h, 7d, 30d
-	Search                                               string // полнотекстовый поиск по id, agent_name, threat_type
-	IP                                                   string // поиск по IP в details->>'top_suspicious_ips'
+	Search                                               string // полнотекстовый поиск по id, agent_name, threat_type, IP
 }
 
 func (r *IncidentRepo) Create(ctx context.Context, in *domain.Incident) error {
@@ -314,10 +313,7 @@ func buildIncidentWhere(f IncidentFilters) (string, []any) {
 		parts = append(parts, fmt.Sprintf("i.created_at > NOW() - INTERVAL '%s'", periodToInterval(f.Period)))
 	}
 	if f.Search != "" {
-		add("(i.id::text ILIKE '%' || $%d || '%' OR COALESCE(a.name,'') ILIKE '%' || $%d || '%' OR i.threat_type ILIKE '%' || $%d || '%')", "%"+f.Search+"%")
-	}
-	if f.IP != "" {
-		add("(COALESCE(i.details->>'top_suspicious_ips','') ILIKE '%' || $%d || '%' OR COALESCE(i.details->>'src_ip','') ILIKE '%' || $%d || '%')", "%"+f.IP+"%")
+		add("(i.id::text ILIKE '%' || $%d || '%' OR COALESCE(a.name,'') ILIKE '%' || $%d || '%' OR i.threat_type ILIKE '%' || $%d || '%' OR COALESCE(i.details->>'top_suspicious_ips','') ILIKE '%' || $%d || '%')", "%"+f.Search+"%")
 	}
 	if len(parts) == 0 {
 		return "", args

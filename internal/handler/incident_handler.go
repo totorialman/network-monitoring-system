@@ -24,7 +24,7 @@ func NewIncidentHandler(incidents *postgres.IncidentRepo, logs LogQuerier) *Inci
 }
 func (h *IncidentHandler) List(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	f := postgres.IncidentFilters{Page: atoi(q.Get("page"), 1), Limit: atoi(q.Get("limit"), 50), Status: q.Get("status"), ThreatType: q.Get("threat_type"), AgentID: q.Get("agent_id"), From: q.Get("from"), To: q.Get("to"), SortBy: q.Get("sort_by"), Order: q.Get("order"), SeverityMin: atoi(q.Get("severity_min"), 0), SeverityMax: atoi(q.Get("severity_max"), 0), Period: q.Get("period"), Search: q.Get("search"), IP: q.Get("ip")}
+	f := postgres.IncidentFilters{Page: atoi(q.Get("page"), 1), Limit: atoi(q.Get("limit"), 50), Status: q.Get("status"), ThreatType: q.Get("threat_type"), AgentID: q.Get("agent_id"), From: q.Get("from"), To: q.Get("to"), SortBy: q.Get("sort_by"), Order: q.Get("order"), SeverityMin: atoi(q.Get("severity_min"), 0), SeverityMax: atoi(q.Get("severity_max"), 0), Period: q.Get("period"), Search: q.Get("search")}
 	items, total, err := h.incidents.List(r.Context(), f)
 	if err != nil {
 		httpx.Error(w, 500, "INCIDENTS_QUERY_FAILED", err.Error(), nil)

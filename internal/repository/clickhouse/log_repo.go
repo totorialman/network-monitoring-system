@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"net"
 	"net/url"
 	"sync/atomic"
 	"time"
@@ -170,7 +171,8 @@ func (r *LogRepo) RawSample(ctx context.Context, agentID string, limit int) []ma
 	for rows.Next() {
 		var (
 			timestamp                                     time.Time
-			srcIP, dstIP, tcpFlags, srcMAC, dstMAC, ethType string
+			srcIP, dstIP                                  net.IP
+			tcpFlags, srcMAC, dstMAC, ethType             string
 			srcPort, dstPort, proto, ttl, length          uint16
 			icmpType, icmpCode                            *uint8
 			vlan                                          *uint16
@@ -181,8 +183,8 @@ func (r *LogRepo) RawSample(ctx context.Context, agentID string, limit int) []ma
 		}
 		row := map[string]any{
 			"timestamp": timestamp.UTC().Format("2006-01-02T15:04:05.000Z"),
-			"src_ip":    srcIP,
-			"dst_ip":    dstIP,
+			"src_ip":    srcIP.String(),
+			"dst_ip":    dstIP.String(),
 			"src_port":  srcPort,
 			"dst_port":  dstPort,
 			"proto":     proto,

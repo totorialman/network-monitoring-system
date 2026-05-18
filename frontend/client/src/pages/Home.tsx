@@ -439,7 +439,7 @@ export default function Home() {
   const [threatTypeFilter, setThreatTypeFilter] = useState("all");
   const [ipFilter, setIpFilter] = useState("");
 
-  const criticalCount = useMemo(() => incidents.filter((i) => i.severity >= 4 && i.status !== "resolved").length, [incidents]);
+  const criticalCount = useMemo(() => incidents.filter((i) => i.severity >= 4 && i.status !== "resolved" && i.status !== "false_positive").length, [incidents]);
 
   const buildIncidentsUrl = useCallback(() => {
     const params = new URLSearchParams();
@@ -448,10 +448,11 @@ export default function Home() {
     params.set("sort_by", "created_at");
     params.set("order", "desc");
     params.set("period", period);
-    if (searchQuery) params.set("search", searchQuery);
+    // Объединяем searchQuery и ipFilter в один search-параметр
+    const combinedSearch = [searchQuery, ipFilter].filter(Boolean).join(" ");
+    if (combinedSearch) params.set("search", combinedSearch);
     if (statusFilter !== "all") params.set("status", statusFilter);
     if (threatTypeFilter !== "all") params.set("threat_type", threatTypeFilter);
-    if (ipFilter) params.set("ip", ipFilter);
     return `/api/incidents?${params.toString()}`;
   }, [page, period, searchQuery, statusFilter, threatTypeFilter, ipFilter]);
 
