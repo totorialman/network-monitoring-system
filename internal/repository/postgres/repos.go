@@ -95,7 +95,7 @@ func (r *IncidentRepo) List(ctx context.Context, f IncidentFilters) ([]domain.In
 		f.Limit = 200
 	}
 	where, args := buildIncidentWhere(f)
-	countQ := `SELECT COUNT(*) FROM incidents i ` + where
+	countQ := `SELECT COUNT(*) FROM incidents i LEFT JOIN agents a ON a.id=i.agent_id ` + where
 	var total int64
 	if err := r.db.QueryRowContext(ctx, countQ, args...).Scan(&total); err != nil {
 		return nil, 0, err
