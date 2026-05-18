@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gorilla/mux"
 	"network-monitor-backend/internal/httpx"
@@ -14,6 +15,7 @@ import (
 // Count — для дашборда, RawSample — для «разворачивания» сырых логов инцидента.
 type LogQuerier interface {
 	Count(context.Context) int64
+	CountSince(ctx context.Context, since time.Time) int64
 	RawSample(ctx context.Context, agentID string, limit int) []map[string]any
 }
 
@@ -44,12 +46,19 @@ func (h *StatsHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	// Получаем top_sources из БД
 	topSources := h.incidents.TopSources(ctx, period)
 
+	logCount := h.logs.Count(ctx)
+	if period != "" {
+		since := periodToTime(period)
+		if cnt := h.logs.CountSince(ctx, since); cnt > 0 {
+			logCount = cnt
+		}
+	}
 	overview := map[string]any{
 		"total_incidents":      st["total_incidents"],
 		"new_incidents":        st["new_incidents"],
 		"critical_count":       st["critical_count"],
 		"active_agents":         st["active_agents"],
-		"total_logs_processed":  h.logs.Count(ctx),
+		"total_logs_processed":  logCount,
 		"avg_ml_score":         st["avg_ml_score"],
 	}
 	httpx.JSON(w, 200, map[string]any{
@@ -85,3 +94,20 @@ func (h *StatsHandler) AgentLogs(w http.ResponseWriter, r *http.Request) {
 }
 
 var _ = strconv.Itoa
+
+func periodToTime(period string) time.Time {
+	switch period {
+	case "1h":
+		return time.Now().Add(-1 * time.Hour)
+	case "6h":
+		return time.Now().Add(-6 * time.Hour)
+	case "24h":
+		return time.Now().Add(-24 * time.Hour)
+	case "7d":
+		return time.Now().Add(-7 * 24 * time.Hour)
+	case "30d":
+		return time.Now().Add(-30 * 24 * time.Hour)
+	default:
+		return time.Now().Add(-24 * time.Hour)
+	}
+}

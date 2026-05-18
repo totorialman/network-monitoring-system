@@ -1,7 +1,7 @@
 /*
 Design philosophy: Swiss Cybernetic Control Room.
 */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -471,6 +471,7 @@ export default function Home() {
   }, [token, period, buildIncidentsUrl]);
 
   // WebSocket — delta updates
+  const wsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!token) return;
     let ws: WebSocket;
@@ -485,7 +486,12 @@ export default function Home() {
           if (msg.type === "new_incident") {
             const inc = msg.payload as { id: string; threat_type: string; log_count: number };
             toast.info(`Новый инцидент: ${threatLabel(inc.threat_type || "")} (${inc.log_count || 0} логов)`);
-            loadData();
+            // Debounce: схлопываем множественные события за 300 мс в один reload
+            if (wsDebounceRef.current) clearTimeout(wsDebounceRef.current);
+            wsDebounceRef.current = setTimeout(() => {
+              wsDebounceRef.current = null;
+              loadData();
+            }, 300);
           }
           if (msg.type === "incident_updated") {
             toast.info(`Статус инцидента обновлён: ${statusLabel(msg.payload?.status || "")}`);

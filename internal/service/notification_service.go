@@ -34,10 +34,40 @@ func (s *NotificationService) SendTelegram(ctx context.Context, incident *domain
 	if incident.Severity < s.cfg.MinSeverity && incident.MLScore < s.cfg.MinScore {
 		return nil
 	}
-	msg := fmt.Sprintf("🚨 ОБНАРУЖЕНА АНОМАЛИЯ!\n\nТип: %s\nСерьёзность: %d/5\nВремя: %s (МСК)\nОценка ML: %.2f\n\nПодробности: %s", incident.ThreatType, incident.Severity, incident.CreatedAt.Format("02.01.2006 15:04:05"), incident.MLScore, s.cfg.BaseIncidentURL)
+	// Иконка по типу угрозы
+	icon := "🟠"
+	switch incident.ThreatType {
+	case "ddos":
+		icon = "🔴"
+	case "port_scan":
+		icon = "🟡"
+	case "anomaly":
+		icon = "🟠"
+	default:
+		icon = "🔵"
+	}
+	// Severity-индикатор: визуальная шкала
+	severityBar := ""
+	for i := 1; i <= 5; i++ {
+		if i <= incident.Severity {
+			severityBar += "■"
+		} else {
+			severityBar += "□"
+		}
+	}
+	msg := fmt.Sprintf("%s *ОБНАРУЖЕНА АНОМАЛИЯ*\n\nТип: *%s*\nКритичность: *%s* %d/5\nОценка ML: *%.2f*\nВремя: *%s* МСК\nID: `%s`\n\n🔗 [Открыть в панели](%s)",
+		icon,
+		incident.ThreatType,
+		severityBar, incident.Severity,
+		incident.MLScore,
+		incident.CreatedAt.Format("02.01.2006 15:04:05"),
+		incident.ID.String(),
+		"https://fluxmon.ru/",
+	)
 	payload := map[string]any{
-		"chat_id": s.cfg.AdminChatID,
-		"text":    msg,
+		"chat_id":    s.cfg.AdminChatID,
+		"text":       msg,
+		"parse_mode": "Markdown",
 		"reply_markup": map[string]any{
 			"inline_keyboard": [][]map[string]string{
 				{

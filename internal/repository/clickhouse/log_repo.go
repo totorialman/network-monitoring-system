@@ -111,6 +111,17 @@ func (r *LogRepo) BatchInsert(ctx context.Context, logs []domain.NetworkLog) err
 
 // Count возвращает актуальное количество сырых логов в ClickHouse.
 // При первом вызове или после перезапуска синхронизируется с ClickHouse.
+// CountSince возвращает количество сырых логов в ClickHouse за указанный период.
+func (r *LogRepo) CountSince(ctx context.Context, since time.Time) int64 {
+	var n int64
+	err := r.db.QueryRowContext(ctx, `SELECT count() FROM network_logs WHERE timestamp > ?`, since).Scan(&n)
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+// Count возвращает актуальное количество сырых логов в ClickHouse.
 func (r *LogRepo) Count(ctx context.Context) int64 {
 	var n int64
 	err := r.db.QueryRowContext(ctx, `SELECT count() FROM network_logs`).Scan(&n)
