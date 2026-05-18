@@ -151,8 +151,18 @@ func (s *LogIngestService) ProcessBatch(logs []domain.NetworkLog, agentID uuid.U
 	// 4. Вычисляем детерминированный seed из содержимого логов (хеш JSON)
 	logSeed := hashLogs(logs)
 
-	// 5. Применяем scoring-логику: специальные правила для port_scan/ddos + сигмоида для остальных
-	finalScore, finalSeverity := s.applyScoring(rawThreatType, rawMLScore, len(logs), logSeed)
+	// 5. Если ML явно сказал «не аномалия» — выставляем обычный трафик с нулевой оценкой
+	var finalScore float64
+	var finalSeverity int
+	if anomalyResult != nil && !anomalyResult.IsAnomaly {
+		rawThreatType = "traffic"
+		finalScore = 0.0
+		finalSeverity = 1
+		detectionMethod = "none"
+	} else {
+		// Применяем scoring-логику: специальные правила для port_scan/ddos + сигмоида для остальных
+		finalScore, finalSeverity = s.applyScoring(rawThreatType, rawMLScore, len(logs), logSeed)
+	}
 
 	details := map[string]any{
 		"anomaly_score":    finalScore,
